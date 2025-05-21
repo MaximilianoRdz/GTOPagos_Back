@@ -59,7 +59,9 @@ python manage.py runserver
 
 ## Technologies Used
 
-- Django 4.2
-- Django REST Framework
+- Django 5.0.2
+- Django REST Framework 3.15.0
 - PostgreSQL
 - Python 3.10+
+- django-cors-headers 4.3.1
+- Pillow 10.2.0
