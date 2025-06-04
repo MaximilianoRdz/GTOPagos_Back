@@ -1,12 +1,12 @@
 from rest_framework import viewsets
-from .models import Currency
+from .models import Currency, User
 from .serializers import CurrencySerializer, UserLoginSerializer, UserSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from rest_framework_simplejwt.tokens import AccessToken
 from rest_framework.parsers import JSONParser
-import time
+from drf_spectacular.utils import extend_schema, OpenApiResponse
+from datetime import datetime
 
 class CurrencyViewSet(viewsets.ModelViewSet):
     queryset = Currency.objects.all()
@@ -17,6 +17,15 @@ class TokenValidateView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
     
+    @extend_schema(
+        operation_id='validate_token',
+        description='Validate JWT token',
+        request=None,
+        responses={
+            200: UserSerializer,
+            400: UserLoginSerializer
+        }
+    )
     def post(self, request):
         try:
             # Obtener el token del header de autorización
@@ -34,17 +43,31 @@ class TokenValidateView(APIView):
             token = AccessToken(access_token)
             
             # Verificar que el token no haya expirado
-            if token['exp'] < time.time():
+            if token['exp'] < datetime.now().timestamp():
                 return Response({
                     "detail": "El token ha expirado",
                     "code": "token_expired"
+                }, status=400)
+            
+            # Verificar que el usuario existe
+            user_id = token['user_id']
+            try:
+                user = User.objects.get(id=user_id, is_active=True)
+            except User.DoesNotExist:
+                return Response({
+                    "detail": "Usuario no encontrado o inactivo",
+                    "code": "user_not_found"
                 }, status=400)
             
             # Si llegamos aquí, el token es válido
             return Response({
                 "detail": "Token válido",
                 "code": "token_valid",
-                "user_id": token['user_id']
+                "user_id": user_id,
+                "user": {
+                    "name": user.name,
+                    "email": user.email
+                }
             })
             
         except Exception as e:
@@ -58,6 +81,15 @@ class UserRegisterView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
     
+    @extend_schema(
+        operation_id='register_user',
+        description='Register a new user',
+        request=UserSerializer,
+        responses={
+            201: UserSerializer,
+            400: UserSerializer
+        }
+    )
     def post(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
@@ -81,6 +113,15 @@ class UserLoginView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
     
+    @extend_schema(
+        operation_id='login_user',
+        description='Login user and get access token',
+        request=UserLoginSerializer,
+        responses={
+            200: UserSerializer,
+            400: UserLoginSerializer
+        }
+    )
     def post(self, request):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
