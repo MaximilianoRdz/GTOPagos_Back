@@ -50,6 +50,34 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
+## API Documentation
+
+The API documentation is available at the following endpoints:
+
+- ReDoc: `http://localhost:8000/api/schema/redoc/`
+- OpenAPI Schema: `http://localhost:8000/api/schema/`
+
+### Authentication
+
+The API uses JWT (JSON Web Tokens) for authentication. To access protected endpoints:
+
+1. Register a new user at `/api/register/`
+2. Login at `/api/login/` to get your access token
+3. Include the token in your requests using the `Authorization` header:
+   ```
+   Authorization: Bearer <your_access_token>
+   ```
+
+### Available Endpoints
+
+#### Users
+- `POST /api/register/` - Register a new user
+- `POST /api/login/` - Login and get access token
+- `POST /api/token/validate/` - Validate JWT token
+
+#### Currencies
+- `GET /api/currencies/` - List all available currencies
+
 ## Project Structure
 
 - `gtopagos/` - Main project configuration
@@ -65,3 +93,4 @@ python manage.py runserver
 - Python 3.10+
 - django-cors-headers 4.3.1
 - Pillow 10.2.0
+- drf-spectacular 0.27.1 (API Documentation)

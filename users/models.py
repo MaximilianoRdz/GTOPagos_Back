@@ -1,6 +1,7 @@
 from django.db import models
 from django.core.validators import EmailValidator
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 
 
 class Currency(models.Model):
@@ -16,7 +17,23 @@ class Currency(models.Model):
         return f"{self.symbol} ({self.code})"
 
 
-class User(models.Model):
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('El email es requerido')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        return self.create_user(email, password, **extra_fields)
+
+
+class User(AbstractUser):
     INCOME_FREQUENCIES = [
         ("weekly", "Weekly"),
         ("biweekly", "Biweekly"),
@@ -24,9 +41,9 @@ class User(models.Model):
         ("yearly", "Yearly"),
     ]
 
-    name = models.CharField(max_length=100)
+    username = None  # Deshabilitamos el campo username
     email = models.EmailField(unique=True, validators=[EmailValidator()])
-    password = models.CharField(max_length=255)
+    name = models.CharField(max_length=100)
     salary = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
     income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly")
@@ -35,17 +52,17 @@ class User(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    USERNAME_FIELD = 'email'
+    REQUIRED_FIELDS = ['name']
+
+    objects = UserManager()
+
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['email']),
             models.Index(fields=['created_at']),
         ]
-
-    def save(self, *args, **kwargs):
-        if self.password and not self.password.startswith('pbkdf2_sha256$'):
-            self.password = make_password(self.password)
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.name 
