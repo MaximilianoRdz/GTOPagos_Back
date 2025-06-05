@@ -54,7 +54,7 @@ ROOT_URLCONF = "gtopagos.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [os.path.join(BASE_DIR, "templates")],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -144,6 +144,9 @@ SIMPLE_JWT = {
 
 # CORS settings
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True  # Only for development
+CORS_ALLOWED_ORIGINS = [
+]
 
 # ReDoc settings
 SPECTACULAR_SETTINGS = {
@@ -151,11 +154,6 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "API para el sistema de pagos GTOPagos",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "SWAGGER_UI_SETTINGS": {
-        "deepLinking": True,
-        "persistAuthorization": True,
-        "displayOperationId": True,
-    },
     "COMPONENT_SPLIT_REQUEST": True,
     "SECURITY": [{"Bearer": []}],
 }
