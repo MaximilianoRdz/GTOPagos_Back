@@ -17,6 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView
+from django.conf import settings
+from django.views.generic import TemplateView
+import sys
+from django import get_version
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,3 +32,16 @@ urlpatterns = [
     # Solo ReDoc UI
     path('api/docs/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
+
+if settings.DEBUG:
+    urlpatterns += [
+        path("", TemplateView.as_view(
+            template_name="index.html",
+            extra_context={
+                "django_version": get_version(),
+                "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+                "debug_mode": settings.DEBUG,
+                "spectacular_settings": settings.SPECTACULAR_SETTINGS,
+            }
+        )),
+    ]
