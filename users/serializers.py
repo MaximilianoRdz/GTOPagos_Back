@@ -23,7 +23,7 @@ class UserSerializer(serializers.ModelSerializer):
     )
     confirm_password = serializers.CharField(
         write_only=True,
-        required=True,
+        required=False,
         style={'input_type': 'password'}
     )
 
@@ -37,15 +37,15 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'last_login', 'created_at', 'updated_at']
 
     def validate(self, data):
-        # Verificar que las contraseñas coincidan
-        if data.get('password') != data.get('confirm_password'):
+        # Solo validar confirm_password si se proporciona
+        if 'confirm_password' in data and data.get('password') != data.get('confirm_password'):
             raise serializers.ValidationError({
                 "confirm_password": "Las contraseñas no coinciden"
             })
         return data
 
     def create(self, validated_data):
-        # Remover confirm_password del validated_data
+        # Remover confirm_password del validated_data si existe
         validated_data.pop('confirm_password', None)
         
         # Encriptar la contraseña

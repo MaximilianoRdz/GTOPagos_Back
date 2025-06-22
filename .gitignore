@@ -27,8 +27,11 @@ db.sqlite3
 db.sqlite3-journal
 media/
 staticfiles/
-*/migrations/*.py
-!*/migrations/__init__.py
+# Solo excluir archivos pyc y pyo en migraciones
+*/migrations/*.py[cod]
+*/migrations/__pycache__/
+# Permitir archivos .py en migraciones
+# !*/migrations/*.py
 
 # Environment
 .env
