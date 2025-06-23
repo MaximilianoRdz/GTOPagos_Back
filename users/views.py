@@ -83,8 +83,26 @@ class UserRegisterView(APIView):
     
     @extend_schema(
         operation_id='register_user',
-        description='Register a new user',
-        request=UserSerializer,
+        description='Register a new user. Fields confirm_password and income_frequency are optional.',
+        request={
+            'application/json': {
+                'type': 'object',
+                'required': ['name', 'email', 'password', 'salary', 'currency_id'],
+                'properties': {
+                    'name': {'type': 'string', 'description': 'User full name'},
+                    'email': {'type': 'string', 'format': 'email', 'description': 'User email (must be unique)'},
+                    'password': {'type': 'string', 'minLength': 8, 'description': 'User password (minimum 8 characters)'},
+                    'confirm_password': {'type': 'string', 'description': 'Password confirmation (optional)'},
+                    'salary': {'type': 'number', 'description': 'User salary'},
+                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency'},
+                    'income_frequency': {
+                        'type': 'string',
+                        'enum': ['weekly', 'biweekly', 'monthly', 'yearly'],
+                        'description': 'Frequency of income (optional)'
+                    }
+                }
+            }
+        },
         responses={
             201: UserSerializer,
             400: UserSerializer

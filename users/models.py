@@ -1,7 +1,17 @@
 from django.db import models
 from django.core.validators import EmailValidator
 from django.contrib.auth.hashers import make_password
-from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.contrib.auth.models import (
+    AbstractBaseUser, BaseUserManager, PermissionsMixin
+)
+from django.utils import timezone
+
+# Eliminar los campos first_name y last_name del modelo User de Django
+from django.contrib.auth.models import User as AuthUser
+if hasattr(AuthUser, 'first_name'):
+    AuthUser.first_name = None
+if hasattr(AuthUser, 'last_name'):
+    AuthUser.last_name = None
 
 
 class Currency(models.Model):
@@ -33,7 +43,7 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 
-class User(AbstractUser):
+class User(AbstractBaseUser, PermissionsMixin):
     INCOME_FREQUENCIES = [
         ("weekly", "Weekly"),
         ("biweekly", "Biweekly"),
@@ -41,14 +51,14 @@ class User(AbstractUser):
         ("yearly", "Yearly"),
     ]
 
-    username = None  # Deshabilitamos el campo username
     email = models.EmailField(unique=True, validators=[EmailValidator()])
     name = models.CharField(max_length=100)
     salary = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
-    income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly")
+    income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly", null=True, blank=True)
     is_active = models.BooleanField(default=True)
-    last_login = models.DateTimeField(null=True, blank=True)
+    is_staff = models.BooleanField(default=False)
+    date_joined = models.DateTimeField(default=timezone.now)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -63,6 +73,12 @@ class User(AbstractUser):
             models.Index(fields=['email']),
             models.Index(fields=['created_at']),
         ]
-
+        
+    def get_full_name(self):
+        return self.name
+        
+    def get_short_name(self):
+        return self.name.split()[0] if self.name else ''
+        
     def __str__(self):
-        return self.name 
+        return f"{self.name} ({self.email})"
