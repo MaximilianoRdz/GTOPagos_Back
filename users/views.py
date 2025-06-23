@@ -8,7 +8,7 @@ from rest_framework.parsers import JSONParser
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from datetime import datetime
 
-class CurrencyViewSet(viewsets.ModelViewSet):
+class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Currency.objects.all()
     serializer_class = CurrencySerializer
     permission_classes = []  # Permitir acceso sin autenticación
