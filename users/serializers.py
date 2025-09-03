@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Currency, User
+from .models import Currency, User, UserProfile
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import MinLengthValidator
 
@@ -8,13 +8,20 @@ class CurrencySerializer(serializers.ModelSerializer):
         model = Currency
         fields = '__all__'
 
-class UserSerializer(serializers.ModelSerializer):
+class UserProfileSerializer(serializers.ModelSerializer):
     currency = CurrencySerializer(read_only=True)
     currency_id = serializers.PrimaryKeyRelatedField(
         queryset=Currency.objects.all(),
-        source='currency',
-        write_only=True
+        source="currency",
+        write_only=True,
+        required=False
     )
+
+    class Meta:
+        model = UserProfile
+        fields = ["salary", "currency", "currency_id", "income_frequency"]
+class UserSerializer(serializers.ModelSerializer):
+    profile = UserProfileSerializer(read_only=True)
     password = serializers.CharField(
         write_only=True,
         required=True,
@@ -30,9 +37,9 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'name', 'email', 'password', 'confirm_password', 'salary',
-            'currency', 'currency_id', 'income_frequency',
-            'is_active', 'last_login', 'created_at', 'updated_at'
+            'id', 'name', 'email', 'password', 'confirm_password', 
+            'is_active', 'last_login', 'created_at', 'updated_at',
+            'profile'
         ]
         read_only_fields = ['id', 'last_login', 'created_at', 'updated_at']
 
@@ -78,3 +85,4 @@ class UserLoginSerializer(serializers.Serializer):
             return data
         except User.DoesNotExist:
             raise serializers.ValidationError("Credenciales inválidas") 
+        

@@ -88,14 +88,14 @@ class UserRegisterView(APIView):
         request={
             'application/json': {
                 'type': 'object',
-                'required': ['name', 'email', 'password', 'salary', 'currency_id'],
+                'required': ['name', 'email', 'password'],
                 'properties': {
                     'name': {'type': 'string', 'description': 'User full name'},
                     'email': {'type': 'string', 'format': 'email', 'description': 'User email (must be unique)'},
                     'password': {'type': 'string', 'minLength': 8, 'description': 'User password (minimum 8 characters)'},
                     'confirm_password': {'type': 'string', 'description': 'Password confirmation (optional)'},
-                    'salary': {'type': 'number', 'description': 'User salary'},
-                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency'},
+                    'salary': {'type': 'number', 'description': 'User salary (optional)'},
+                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency (optional)'},
                     'income_frequency': {
                         'type': 'string',
                         'enum': ['weekly', 'biweekly', 'monthly', 'yearly'],
@@ -113,19 +113,45 @@ class UserRegisterView(APIView):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Generar el token de acceso
+
+            # Crear perfil si vienen datos financieros
+            salary = request.data.get("salary")
+            currency_id = request.data.get("currency_id")
+            income_frequency = request.data.get("income_frequency", "monthly")
+
+            profile_data = {}
+            if salary and currency_id:
+                from .models import Currency, UserProfile
+                try:
+                    currency = Currency.objects.get(id=currency_id)
+                except Currency.DoesNotExist:
+                    return Response({"currency_id": "Invalid currency_id"}, status=400)
+
+                profile = UserProfile.objects.create(
+                    user=user,
+                    salary=salary,
+                    currency=currency,
+                    income_frequency=income_frequency
+                )
+                profile_data = {
+                    "salary": profile.salary,
+                    "currency": profile.currency.code,
+                    "income_frequency": profile.income_frequency
+                }
+
+            # Generar token
             access_token = AccessToken.for_user(user)
+
             return Response({
                 "user": {
                     "id": user.id,
                     "name": user.name,
                     "email": user.email,
-                    "salary": user.salary,
-                    "currency": user.currency.code,
-                    "income_frequency": user.income_frequency
+                    "profile": profile_data
                 },
                 "access_token": str(access_token)
             }, status=201)
+
         return Response(serializer.errors, status=400)
 
 class UserLoginView(APIView):
@@ -147,19 +173,28 @@ class UserLoginView(APIView):
             user = serializer.validated_data['user']
             refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
+
+            # Traer el perfil si existe
+            profile = getattr(user, "profile", None)
+
             user_data = {
-                'name': user.name,
-                'email': user.email,
-                'salary': user.salary,
-                'currency': user.currency.code
+                "id": user.id,
+                "name": user.name,
+                "email": user.email,
+                "profile": {
+                    "salary": profile.salary if profile else None,
+                    "currency": profile.currency.code if profile and profile.currency else None,
+                    "income_frequency": profile.income_frequency if profile else None
+                }
             }
+
             return Response({
-                'user': user_data,
-                'refresh': str(refresh),
-                'access_token': str(access_token)
-            })
-        return Response(serializer.errors, status=400)
-    
+                "user": user_data,
+                "refresh": str(refresh),
+                "access_token": str(access_token)
+            }, status=200)
+
+        return Response(serializer.errors, status=400)  
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser]

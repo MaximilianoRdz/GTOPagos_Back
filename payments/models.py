@@ -22,6 +22,9 @@ class PaymentStatus(models.Model):
     class Meta:
         verbose_name_plural = "Payment Statuses"
         ordering = ['status']
-
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['is_active']),
+        ]
     def __str__(self):
         return self.status 

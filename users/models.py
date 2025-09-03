@@ -5,13 +5,14 @@ from django.contrib.auth.models import (
     AbstractBaseUser, BaseUserManager, PermissionsMixin
 )
 from django.utils import timezone
+from django.conf import settings
 
 # Eliminar los campos first_name y last_name del modelo User de Django
-from django.contrib.auth.models import User as AuthUser
-if hasattr(AuthUser, 'first_name'):
-    AuthUser.first_name = None
-if hasattr(AuthUser, 'last_name'):
-    AuthUser.last_name = None
+# from django.contrib.auth.models import User as AuthUser
+# if hasattr(AuthUser, 'first_name'):
+#     AuthUser.first_name = None
+# if hasattr(AuthUser, 'last_name'):
+#     AuthUser.last_name = None
 
 
 class Currency(models.Model):
@@ -44,18 +45,9 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
-    INCOME_FREQUENCIES = [
-        ("weekly", "Weekly"),
-        ("biweekly", "Biweekly"),
-        ("monthly", "Monthly"),
-        ("yearly", "Yearly"),
-    ]
-
+    
     email = models.EmailField(unique=True, validators=[EmailValidator()])
     name = models.CharField(max_length=100)
-    salary = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.ForeignKey(Currency, on_delete=models.PROTECT)
-    income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly", null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
@@ -82,3 +74,25 @@ class User(AbstractBaseUser, PermissionsMixin):
         
     def __str__(self):
         return f"{self.name} ({self.email})"
+
+class UserProfile(models.Model):
+    INCOME_FREQUENCIES = [
+        ("weekly", "Weekly"),
+        ("biweekly", "Biweekly"),
+        ("monthly", "Monthly"),
+        ("yearly", "Yearly"),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    salary = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
+    income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly", null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['salary']),
+            models.Index(fields=['income_frequency']),
+        ]
+
+    def __str__(self):
+        return f"Profile of {self.user.name}"
