@@ -163,42 +163,53 @@ class UserLoginView(APIView):
 class LogoutView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
-    
+
     @extend_schema(
         operation_id='logout_user',
-        description='Logout user by invalidating the client-side token',
+        description='Logout descartando los tokens del cliente. Acepta refresh en body o access token en Authorization.',
         request={
             'application/json': {
                 'type': 'object',
-                'required': ['refresh'],
                 'properties': {
-                    'refresh': {'type': 'string', 'description': 'Refresh token to invalidate'}
+                    'refresh': {'type': 'string', 'description': 'Refresh token'},
+                    'token': {'type': 'string', 'description': 'Access token'},
+                    'access_token': {'type': 'string', 'description': 'Access token alias'}
                 }
             }
         },
         responses={
-            204: OpenApiResponse(description='No content, logout successful'),
-            400: OpenApiResponse(description='Bad request, invalid token')
+            200: OpenApiResponse(description='Logout successful')
         }
     )
     def post(self, request):
         try:
             refresh_token = request.data.get('refresh')
-            if not refresh_token:
-                return Response({"detail": "Se requiere el refresh token"}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # En JWT, el logout es principalmente un proceso del lado del cliente
-            # donde el cliente descarta los tokens
-            # Aquí simplemente validamos que el token sea válido y devolvemos una respuesta exitosa
-            # El cliente debe eliminar los tokens almacenados localmente
-            
-            try:
-                # Verificamos que el token sea válido
-                RefreshToken(refresh_token)
-            except Exception:
-                return Response({"detail": "Token inválido"}, status=status.HTTP_400_BAD_REQUEST)
-            
+            token_in_body = request.data.get('token') or request.data.get('access_token')
+            auth_header = request.headers.get('Authorization')
+
+            if refresh_token:
+                try:
+                    RefreshToken(refresh_token)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
+            if auth_header:
+                parts = auth_header.split(' ')
+                maybe_token = parts[1] if len(parts) > 1 else parts[0]
+                try:
+                    AccessToken(maybe_token)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
+            if token_in_body:
+                try:
+                    AccessToken(token_in_body)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
             return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": f"Error al cerrar sesión: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-    
