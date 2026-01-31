@@ -19,13 +19,28 @@ class Currency(models.Model):
     code = models.CharField(max_length=3, unique=True)
     name = models.CharField(max_length=50)
     symbol = models.CharField(max_length=5)
+    sort_order = models.IntegerField(default=100)
 
     class Meta:
         verbose_name_plural = "Currencies"
-        ordering = ['code']
+        ordering = ['sort_order', 'code']
 
     def __str__(self):
         return f"{self.symbol} ({self.code})"
+
+class IncomeFrequency(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    name = models.CharField(max_length=50)          
+    description = models.TextField(blank=True)
+    sort_order = models.PositiveIntegerField(default=100)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['sort_order', 'name']
+        verbose_name_plural = "Income Frequencies"
+
+    def __str__(self):
+        return self.name
 
 
 class UserManager(BaseUserManager):
@@ -47,7 +62,6 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
     
     email = models.EmailField(unique=True, validators=[EmailValidator()])
-    name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=timezone.now)
@@ -55,7 +69,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     updated_at = models.DateTimeField(auto_now=True)
 
     USERNAME_FIELD = 'email'
-    REQUIRED_FIELDS = ['name']
 
     objects = UserManager()
 
@@ -67,31 +80,34 @@ class User(AbstractBaseUser, PermissionsMixin):
         ]
         
     def get_full_name(self):
-        return self.name
+        if hasattr(self, "profile"):
+            return f"{self.profile.first_name} {self.profile.last_name}".strip()
+        return ""
         
     def get_short_name(self):
-        return self.name.split()[0] if self.name else ''
+        if hasattr(self, "profile"):
+            return self.profile.first_name
+        return ""
         
     def __str__(self):
-        return f"{self.name} ({self.email})"
+        if hasattr(self, "profile"):
+            return f"{self.get_full_name()} ({self.email})"
+        return self.email
 
 class UserProfile(models.Model):
-    INCOME_FREQUENCIES = [
-        ("weekly", "Weekly"),
-        ("biweekly", "Biweekly"),
-        ("monthly", "Monthly"),
-        ("yearly", "Yearly"),
-    ]
-
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="profile")
+    first_name = models.CharField(max_length=150, null=True, blank=True)
+    last_name = models.CharField(max_length=150, null=True, blank=True)
+    phone = models.CharField(max_length=20, null=True, blank=True)
     salary = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
-    income_frequency = models.CharField(max_length=10, choices=INCOME_FREQUENCIES, default="monthly", null=True, blank=True)
+    income_frequency = models.ForeignKey(IncomeFrequency, on_delete=models.PROTECT, null=True, blank=True, related_name="profiles")
 
     class Meta:
         indexes = [
             models.Index(fields=['salary']),
             models.Index(fields=['income_frequency']),
+            models.Index(fields=['phone']),
         ]
 
     def __str__(self):

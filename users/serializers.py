@@ -1,11 +1,16 @@
 from rest_framework import serializers
-from .models import Currency, User, UserProfile
+from .models import Currency, User, UserProfile, IncomeFrequency
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import MinLengthValidator
 
 class CurrencySerializer(serializers.ModelSerializer):
     class Meta:
         model = Currency
+        fields = '__all__'
+
+class IncomeFrequencySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IncomeFrequency
         fields = '__all__'
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -17,9 +22,28 @@ class UserProfileSerializer(serializers.ModelSerializer):
         required=False
     )
 
+    income_frequency = IncomeFrequencySerializer(read_only=True)
+    income_frequency_id = serializers.PrimaryKeyRelatedField(
+        queryset=IncomeFrequency.objects.all(),
+        source="income_frequency",
+        write_only=True,
+        required=False
+    )
+
     class Meta:
         model = UserProfile
-        fields = ["salary", "currency", "currency_id", "income_frequency"]
+        fields = [
+            "first_name",
+            "last_name",
+            "phone",
+            "salary",
+            "currency",
+            "currency_id",
+            "income_frequency",
+            "income_frequency_id",
+        ]
+
+
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(read_only=True)
     password = serializers.CharField(
@@ -37,7 +61,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'name', 'email', 'password', 'confirm_password', 
+            'id', 'email', 'password', 'confirm_password', 
             'is_active', 'last_login', 'created_at', 'updated_at',
             'profile'
         ]
