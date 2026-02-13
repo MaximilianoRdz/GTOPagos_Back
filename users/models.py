@@ -29,14 +29,12 @@ class Currency(models.Model):
         return f"{self.symbol} ({self.code})"
 
 class IncomeFrequency(models.Model):
-    code = models.CharField(max_length=20, unique=True)
     name = models.CharField(max_length=50)          
     description = models.TextField(blank=True)
-    sort_order = models.PositiveIntegerField(default=100)
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ['sort_order', 'name']
+        ordering = ['id']
         verbose_name_plural = "Income Frequencies"
 
     def __str__(self):
