@@ -111,4 +111,4 @@ class UserProfile(models.Model):
         ]
 
     def __str__(self):
-        return f"Profile of {self.user.name}"
+        return f"{self.first_name or ''} {self.last_name or ''}".strip() or self.user.email

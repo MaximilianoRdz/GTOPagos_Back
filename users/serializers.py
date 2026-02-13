@@ -109,4 +109,33 @@ class UserLoginSerializer(serializers.Serializer):
             return data
         except User.DoesNotExist:
             raise serializers.ValidationError("Credenciales inválidas") 
-        
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(
+        write_only=True,
+        validators=[MinLengthValidator(8)]
+    )
+    confirm_password = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context['request'].user
+
+        if not check_password(value, user.password):
+            raise serializers.ValidationError("La contraseña actual es incorrecta")
+
+        return value
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                "confirm_password": "Las contraseñas no coinciden"
+            })
+
+        return data
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.password = make_password(self.validated_data['new_password'])
+        user.save()
+        return user
