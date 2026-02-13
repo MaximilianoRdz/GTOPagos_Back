@@ -96,8 +96,18 @@ class UserRegisterView(APIView):
                 'required': ['email', 'password'],
                 'properties': {
                     'email': {'type': 'string', 'format': 'email', 'description': 'User email (must be unique)'},
+                    'first_name': {'type': 'string', 'description': 'First name (optional)'},
+                    'last_name': {'type': 'string', 'description': 'Last name (optional)'},
+                    'phone': {'type': 'string', 'description': 'Phone number (optional)'},
                     'password': {'type': 'string', 'minLength': 8, 'description': 'User password (minimum 8 characters)'},
                     'confirm_password': {'type': 'string', 'description': 'Password confirmation (optional)'},
+                    'salary': {'type': 'number', 'description': 'User salary (optional)'},
+                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency (optional)'},
+                    'income_frequency': {
+                        'type': 'string',
+                        'enum': ['weekly', 'biweekly', 'monthly', 'yearly'],
+                        'description': 'Frequency of income (optional)'
+                    }
                 }
             }
         },
@@ -111,8 +121,46 @@ class UserRegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
 
-            # Crear perfil vacío (clave)
-            UserProfile.objects.create(user=user)
+            # Obtener o crear perfil (ya debería haber sido creado por el serializer)
+            profile, created = UserProfile.objects.get_or_create(user=user)
+
+            # Actualizar datos personales
+            profile.first_name = request.data.get("first_name", "")
+            profile.last_name = request.data.get("last_name", "")
+            profile.phone = request.data.get("phone", "")
+
+            # Crear perfil si vienen datos financieros
+            salary = request.data.get("salary")
+            currency_id = request.data.get("currency_id")
+            income_freq_input = request.data.get("income_frequency")
+
+            if salary and currency_id:
+                try:
+                    currency = Currency.objects.get(id=currency_id)
+                except Currency.DoesNotExist:
+                    # Si no existe moneda, creamos perfil vacío o manejamos error.
+                    return Response({"currency_id": "Invalid currency_id"}, status=400)
+
+                # Resolver IncomeFrequency
+                income_frequency_obj = None
+                if income_freq_input:
+                    if isinstance(income_freq_input, int):
+                        income_frequency_obj = IncomeFrequency.objects.filter(id=income_freq_input).first()
+                    else:
+                        income_frequency_obj = IncomeFrequency.objects.filter(name__iexact=str(income_freq_input)).first()
+                
+                # Default a 'monthly' si no se encuentra
+                if not income_frequency_obj:
+                    income_frequency_obj = IncomeFrequency.objects.filter(name__iexact="monthly").first()
+
+                profile.salary = salary
+                profile.currency = currency
+                profile.income_frequency = income_frequency_obj
+            
+            profile.save()
+            
+            # Usar el serializer para retornar datos limpios del perfil
+            profile_data = UserProfileSerializer(profile).data
 
             # Generar token
             access_token = AccessToken.for_user(user)
@@ -121,6 +169,7 @@ class UserRegisterView(APIView):
                 "user": {
                     "id": user.id,
                     "email": user.email,
+                    "profile": profile_data
                 },
                 "access_token": str(access_token)
             }, status=201)
@@ -144,16 +193,17 @@ class UserLoginView(APIView):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
+            # Generar solo access token como solicitado
+            access_token = AccessToken.for_user(user)
 
             # Traer el perfil si existe
             profile = getattr(user, "profile", None)
 
             return Response({
                 "user": UserSerializer(user).data,
-                "refresh": str(refresh),
-                "access_token": str(access_token)
+                "access_token": str(access_token),
+                # El profile ya viene dentro de UserSerializer(user).data si está configurado así, 
+                # pero UserSerializer tiene 'profile' = UserProfileSerializer
             }, status=200)
 
         return Response(serializer.errors, status=400)  
