@@ -95,8 +95,18 @@ class UserRegisterView(APIView):
                 'required': ['email', 'password'],
                 'properties': {
                     'email': {'type': 'string', 'format': 'email', 'description': 'User email (must be unique)'},
+                    'first_name': {'type': 'string', 'description': 'First name (optional)'},
+                    'last_name': {'type': 'string', 'description': 'Last name (optional)'},
+                    'phone': {'type': 'string', 'description': 'Phone number (optional)'},
                     'password': {'type': 'string', 'minLength': 8, 'description': 'User password (minimum 8 characters)'},
                     'confirm_password': {'type': 'string', 'description': 'Password confirmation (optional)'},
+                    'salary': {'type': 'number', 'description': 'User salary (optional)'},
+                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency (optional)'},
+                    'income_frequency': {
+                        'type': 'string',
+                        'enum': ['weekly', 'biweekly', 'monthly', 'yearly'],
+                        'description': 'Frequency of income (optional)'
+                    }
                 }
             }
         },
@@ -110,8 +120,47 @@ class UserRegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
 
-            # Crear perfil vacío (clave)
-            UserProfile.objects.create(user=user)
+            # Obtener o crear perfil (ya debería haber sido creado por el serializer)
+            profile, created = UserProfile.objects.get_or_create(user=user)
+
+            # Actualizar datos personales
+            profile.first_name = request.data.get("first_name", "")
+            profile.last_name = request.data.get("last_name", "")
+            profile.phone = request.data.get("phone", "")
+
+            # Crear perfil si vienen datos financieros
+            salary = request.data.get("salary")
+            currency_id = request.data.get("currency_id")
+            income_freq_input = request.data.get("income_frequency")
+
+            if salary and currency_id:
+                from .models import Currency, UserProfile, IncomeFrequency
+                try:
+                    currency = Currency.objects.get(id=currency_id)
+                except Currency.DoesNotExist:
+                    # Si no existe moneda, creamos perfil vacío o manejamos error.
+                    return Response({"currency_id": "Invalid currency_id"}, status=400)
+
+                # Resolver IncomeFrequency
+                income_frequency_obj = None
+                if income_freq_input:
+                    if isinstance(income_freq_input, int):
+                        income_frequency_obj = IncomeFrequency.objects.filter(id=income_freq_input).first()
+                    else:
+                        income_frequency_obj = IncomeFrequency.objects.filter(name__iexact=str(income_freq_input)).first()
+                
+                # Default a 'monthly' si no se encuentra
+                if not income_frequency_obj:
+                    income_frequency_obj = IncomeFrequency.objects.filter(name__iexact="monthly").first()
+
+                profile.salary = salary
+                profile.currency = currency
+                profile.income_frequency = income_frequency_obj
+            
+            profile.save()
+            
+            # Usar el serializer para retornar datos limpios del perfil
+            profile_data = UserProfileSerializer(profile).data
 
             # Generar token
             access_token = AccessToken.for_user(user)
@@ -120,6 +169,7 @@ class UserRegisterView(APIView):
                 "user": {
                     "id": user.id,
                     "email": user.email,
+                    "profile": profile_data
                 },
                 "access_token": str(access_token)
             }, status=201)
@@ -143,57 +193,70 @@ class UserLoginView(APIView):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
+            # Generar solo access token como solicitado
+            access_token = AccessToken.for_user(user)
 
             # Traer el perfil si existe
             profile = getattr(user, "profile", None)
 
             return Response({
                 "user": UserSerializer(user).data,
-                "refresh": str(refresh),
-                "access_token": str(access_token)
+                "access_token": str(access_token),
+                # El profile ya viene dentro de UserSerializer(user).data si está configurado así, 
+                # pero UserSerializer tiene 'profile' = UserProfileSerializer
             }, status=200)
 
         return Response(serializer.errors, status=400)  
 class LogoutView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
-    
+
     @extend_schema(
         operation_id='logout_user',
-        description='Logout user by invalidating the client-side token',
+        description='Logout descartando los tokens del cliente. Acepta refresh en body o access token en Authorization.',
         request={
             'application/json': {
                 'type': 'object',
-                'required': ['refresh'],
                 'properties': {
-                    'refresh': {'type': 'string', 'description': 'Refresh token to invalidate'}
+                    'refresh': {'type': 'string', 'description': 'Refresh token'},
+                    'token': {'type': 'string', 'description': 'Access token'},
+                    'access_token': {'type': 'string', 'description': 'Access token alias'}
                 }
             }
         },
         responses={
-            204: OpenApiResponse(description='No content, logout successful'),
-            400: OpenApiResponse(description='Bad request, invalid token')
+            200: OpenApiResponse(description='Logout successful')
         }
     )
     def post(self, request):
         try:
             refresh_token = request.data.get('refresh')
-            if not refresh_token:
-                return Response({"detail": "Se requiere el refresh token"}, status=status.HTTP_400_BAD_REQUEST)
-            
-            # En JWT, el logout es principalmente un proceso del lado del cliente
-            # donde el cliente descarta los tokens
-            # Aquí simplemente validamos que el token sea válido y devolvemos una respuesta exitosa
-            # El cliente debe eliminar los tokens almacenados localmente
-            
-            try:
-                # Verificamos que el token sea válido
-                RefreshToken(refresh_token)
-            except Exception:
-                return Response({"detail": "Token inválido"}, status=status.HTTP_400_BAD_REQUEST)
-            
+            token_in_body = request.data.get('token') or request.data.get('access_token')
+            auth_header = request.headers.get('Authorization')
+
+            if refresh_token:
+                try:
+                    RefreshToken(refresh_token)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
+            if auth_header:
+                parts = auth_header.split(' ')
+                maybe_token = parts[1] if len(parts) > 1 else parts[0]
+                try:
+                    AccessToken(maybe_token)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
+            if token_in_body:
+                try:
+                    AccessToken(token_in_body)
+                except Exception:
+                    pass
+                return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
+
             return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": f"Error al cerrar sesión: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
@@ -223,5 +286,3 @@ class UserProfileView(APIView):
             return Response(serializer.data, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-    
