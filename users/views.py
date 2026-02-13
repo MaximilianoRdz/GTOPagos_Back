@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
-from .models import Currency, User
-from .serializers import CurrencySerializer, UserLoginSerializer, UserSerializer
+from .models import Currency, User, IncomeFrequency, UserProfile
+from .serializers import CurrencySerializer, UserLoginSerializer, UserSerializer, IncomeFrequencySerializer, UserProfileSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
@@ -8,14 +8,20 @@ from rest_framework.parsers import JSONParser
 from drf_spectacular.utils import extend_schema, OpenApiResponse
 from datetime import datetime
 from rest_framework.permissions import IsAuthenticated
+from .serializers import ChangePasswordSerializer
 
-class CurrencyViewSet(viewsets.ModelViewSet):
+class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Currency.objects.all()
     serializer_class = CurrencySerializer
     permission_classes = []  # Permitir acceso sin autenticación
-    
-class TokenValidateView(APIView):
+
+class IncomeFrequencyViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = IncomeFrequency.objects.filter(is_active=True)
+    serializer_class = IncomeFrequencySerializer
     permission_classes = []
+
+class TokenValidateView(APIView):
+    permission_classes = [IsAuthenticated]
     parser_classes = [JSONParser]
     
     @extend_schema(
@@ -53,7 +59,7 @@ class TokenValidateView(APIView):
             # Verificar que el usuario existe
             user_id = token['user_id']
             try:
-                user = User.objects.get(id=user_id, is_active=True)
+                user = User.objects.select_related('profile').get(id=user_id, is_active=True)
             except User.DoesNotExist:
                 return Response({
                     "detail": "Usuario no encontrado o inactivo",
@@ -66,7 +72,6 @@ class TokenValidateView(APIView):
                 "code": "token_valid",
                 "user_id": user_id,
                 "user": {
-                    "name": user.name,
                     "email": user.email
                 }
             })
@@ -88,14 +93,16 @@ class UserRegisterView(APIView):
         request={
             'application/json': {
                 'type': 'object',
-                'required': ['name', 'email', 'password', 'salary', 'currency_id'],
+                'required': ['email', 'password'],
                 'properties': {
-                    'name': {'type': 'string', 'description': 'User full name'},
                     'email': {'type': 'string', 'format': 'email', 'description': 'User email (must be unique)'},
+                    'first_name': {'type': 'string', 'description': 'First name (optional)'},
+                    'last_name': {'type': 'string', 'description': 'Last name (optional)'},
+                    'phone': {'type': 'string', 'description': 'Phone number (optional)'},
                     'password': {'type': 'string', 'minLength': 8, 'description': 'User password (minimum 8 characters)'},
                     'confirm_password': {'type': 'string', 'description': 'Password confirmation (optional)'},
-                    'salary': {'type': 'number', 'description': 'User salary'},
-                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency'},
+                    'salary': {'type': 'number', 'description': 'User salary (optional)'},
+                    'currency_id': {'type': 'integer', 'description': 'ID of the user currency (optional)'},
                     'income_frequency': {
                         'type': 'string',
                         'enum': ['weekly', 'biweekly', 'monthly', 'yearly'],
@@ -113,19 +120,60 @@ class UserRegisterView(APIView):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
-            # Generar el token de acceso
+
+            # Obtener o crear perfil (ya debería haber sido creado por el serializer)
+            profile, created = UserProfile.objects.get_or_create(user=user)
+
+            # Actualizar datos personales
+            profile.first_name = request.data.get("first_name", "")
+            profile.last_name = request.data.get("last_name", "")
+            profile.phone = request.data.get("phone", "")
+
+            # Crear perfil si vienen datos financieros
+            salary = request.data.get("salary")
+            currency_id = request.data.get("currency_id")
+            income_freq_input = request.data.get("income_frequency")
+
+            if salary and currency_id:
+                try:
+                    currency = Currency.objects.get(id=currency_id)
+                except Currency.DoesNotExist:
+                    # Si no existe moneda, creamos perfil vacío o manejamos error.
+                    return Response({"currency_id": "Invalid currency_id"}, status=400)
+
+                # Resolver IncomeFrequency
+                income_frequency_obj = None
+                if income_freq_input:
+                    if isinstance(income_freq_input, int):
+                        income_frequency_obj = IncomeFrequency.objects.filter(id=income_freq_input).first()
+                    else:
+                        income_frequency_obj = IncomeFrequency.objects.filter(name__iexact=str(income_freq_input)).first()
+                
+                # Default a 'monthly' si no se encuentra
+                if not income_frequency_obj:
+                    income_frequency_obj = IncomeFrequency.objects.filter(name__iexact="monthly").first()
+
+                profile.salary = salary
+                profile.currency = currency
+                profile.income_frequency = income_frequency_obj
+            
+            profile.save()
+            
+            # Usar el serializer para retornar datos limpios del perfil
+            profile_data = UserProfileSerializer(profile).data
+
+            # Generar token
             access_token = AccessToken.for_user(user)
+
             return Response({
                 "user": {
                     "id": user.id,
-                    "name": user.name,
                     "email": user.email,
-                    "salary": user.salary,
-                    "currency": user.currency.code,
-                    "income_frequency": user.income_frequency
+                    "profile": profile_data
                 },
                 "access_token": str(access_token)
             }, status=201)
+
         return Response(serializer.errors, status=400)
 
 class UserLoginView(APIView):
@@ -145,21 +193,20 @@ class UserLoginView(APIView):
         serializer = UserLoginSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.validated_data['user']
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-            user_data = {
-                'name': user.name,
-                'email': user.email,
-                'salary': user.salary,
-                'currency': user.currency.code
-            }
+            # Generar solo access token como solicitado
+            access_token = AccessToken.for_user(user)
+
+            # Traer el perfil si existe
+            profile = getattr(user, "profile", None)
+
             return Response({
-                'user': user_data,
-                'refresh': str(refresh),
-                'access_token': str(access_token)
-            })
-        return Response(serializer.errors, status=400)
-    
+                "user": UserSerializer(user).data,
+                "access_token": str(access_token),
+                # El profile ya viene dentro de UserSerializer(user).data si está configurado así, 
+                # pero UserSerializer tiene 'profile' = UserProfileSerializer
+            }, status=200)
+
+        return Response(serializer.errors, status=400)  
 class LogoutView(APIView):
     permission_classes = []
     parser_classes = [JSONParser]
@@ -213,3 +260,48 @@ class LogoutView(APIView):
             return Response({"detail": "Sesión cerrada exitosamente"}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"detail": f"Error al cerrar sesión: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+class UserProfileView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_profile(self, user):
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        return profile
+
+    def get(self, request):
+        profile = self._get_profile(request.user)
+        serializer = UserProfileSerializer(profile)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        profile = self._get_profile(request.user)
+        serializer = UserProfileSerializer(
+            profile,
+            data=request.data,
+            partial=True
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {"message": "Contraseña actualizada correctamente"},
+                status=status.HTTP_200_OK
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+

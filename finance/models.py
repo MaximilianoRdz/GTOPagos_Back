@@ -51,6 +51,20 @@ class FinancialRecord(models.Model):
             models.Index(fields=['is_recurrent']),
         ]
 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.category and self.record_type:
+            if self.category.record_type != self.record_type:
+                raise ValidationError(
+                    f"La categoría '{self.category.name}' pertenece al tipo '{self.category.record_type.name}', "
+                    f"pero el registro está marcado como '{self.record_type.name}'. "
+                    "Deben coincidir."
+                )
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"{self.record_type.name} - {self.amount}"
 

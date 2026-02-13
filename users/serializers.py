@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Currency, User
+from .models import Currency, User, UserProfile, IncomeFrequency
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import MinLengthValidator
 
@@ -8,13 +8,44 @@ class CurrencySerializer(serializers.ModelSerializer):
         model = Currency
         fields = '__all__'
 
-class UserSerializer(serializers.ModelSerializer):
+class IncomeFrequencySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IncomeFrequency
+        fields = '__all__'
+
+class UserProfileSerializer(serializers.ModelSerializer):
     currency = CurrencySerializer(read_only=True)
     currency_id = serializers.PrimaryKeyRelatedField(
         queryset=Currency.objects.all(),
-        source='currency',
-        write_only=True
+        source="currency",
+        write_only=True,
+        required=False
     )
+
+    income_frequency = IncomeFrequencySerializer(read_only=True)
+    income_frequency_id = serializers.PrimaryKeyRelatedField(
+        queryset=IncomeFrequency.objects.all(),
+        source="income_frequency",
+        write_only=True,
+        required=False
+    )
+
+    class Meta:
+        model = UserProfile
+        fields = [
+            "first_name",
+            "last_name",
+            "phone",
+            "salary",
+            "currency",
+            "currency_id",
+            "income_frequency",
+            "income_frequency_id",
+        ]
+
+
+class UserSerializer(serializers.ModelSerializer):
+    profile = UserProfileSerializer(read_only=True)
     password = serializers.CharField(
         write_only=True,
         required=True,
@@ -30,9 +61,9 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'name', 'email', 'password', 'confirm_password', 'salary',
-            'currency', 'currency_id', 'income_frequency',
-            'is_active', 'last_login', 'created_at', 'updated_at'
+            'id', 'email', 'password', 'confirm_password', 
+            'is_active', 'last_login', 'created_at', 'updated_at',
+            'profile'
         ]
         read_only_fields = ['id', 'last_login', 'created_at', 'updated_at']
 
@@ -78,3 +109,33 @@ class UserLoginSerializer(serializers.Serializer):
             return data
         except User.DoesNotExist:
             raise serializers.ValidationError("Credenciales inválidas") 
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(
+        write_only=True,
+        validators=[MinLengthValidator(8)]
+    )
+    confirm_password = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context['request'].user
+
+        if not check_password(value, user.password):
+            raise serializers.ValidationError("La contraseña actual es incorrecta")
+
+        return value
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                "confirm_password": "Las contraseñas no coinciden"
+            })
+
+        return data
+
+    def save(self, **kwargs):
+        user = self.context['request'].user
+        user.password = make_password(self.validated_data['new_password'])
+        user.save()
+        return user
