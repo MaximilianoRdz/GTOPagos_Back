@@ -30,7 +30,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "rest_framework_simplejwt",
-    "oauth2_provider",
+    # "oauth2_provider",
     "drf_spectacular",  # API documentation
     # Local apps
     "users",

@@ -134,7 +134,6 @@ class UserRegisterView(APIView):
             income_freq_input = request.data.get("income_frequency")
 
             if salary and currency_id:
-                from .models import Currency, UserProfile, IncomeFrequency
                 try:
                     currency = Currency.objects.get(id=currency_id)
                 except Currency.DoesNotExist:
