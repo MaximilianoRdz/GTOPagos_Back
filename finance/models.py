@@ -31,6 +31,7 @@ class Category(models.Model):
 
 class FinancialRecord(models.Model):
     user = models.ForeignKey(User, related_name="financial_records", on_delete=models.CASCADE)
+    dashboard = models.ForeignKey('dashboard.UserFinanceDashboard', on_delete=models.PROTECT, null=False, blank=False, related_name='financial_records')
     record_type = models.ForeignKey(FinancialRecordType, on_delete=models.PROTECT)
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     payment_method = models.ForeignKey('payments.PaymentMethod', on_delete=models.SET_NULL, null=True, blank=True)
@@ -49,6 +50,7 @@ class FinancialRecord(models.Model):
             models.Index(fields=['user', 'record_date']),
             models.Index(fields=['record_type', 'category']),
             models.Index(fields=['is_recurrent']),
+            models.Index(fields=['dashboard']),
         ]
 
     def clean(self):
@@ -60,6 +62,8 @@ class FinancialRecord(models.Model):
                     f"pero el registro está marcado como '{self.record_type.name}'. "
                     "Deben coincidir."
                 )
+        if self.dashboard and self.dashboard.user_id != self.user_id:
+            raise ValidationError("El dashboard pertenece a otro usuario")
 
     def save(self, *args, **kwargs):
         self.clean()
