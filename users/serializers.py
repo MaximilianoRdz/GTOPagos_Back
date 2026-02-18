@@ -14,19 +14,15 @@ class IncomeFrequencySerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    currency = CurrencySerializer(read_only=True)
     currency_id = serializers.PrimaryKeyRelatedField(
         queryset=Currency.objects.all(),
         source="currency",
-        write_only=True,
         required=False
     )
 
-    income_frequency = IncomeFrequencySerializer(read_only=True)
     income_frequency_id = serializers.PrimaryKeyRelatedField(
         queryset=IncomeFrequency.objects.all(),
         source="income_frequency",
-        write_only=True,
         required=False
     )
 
@@ -37,9 +33,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "last_name",
             "phone",
             "salary",
-            "currency",
             "currency_id",
-            "income_frequency",
             "income_frequency_id",
         ]
 
