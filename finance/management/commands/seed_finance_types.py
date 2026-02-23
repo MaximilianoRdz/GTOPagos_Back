@@ -47,4 +47,15 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(f'  - Categoría existente: {cat_name}')
         
+        gasto_type, gasto_created = FinancialRecordType.objects.get_or_create(name="Gasto")
+        if gasto_created:
+            self.stdout.write(self.style.SUCCESS("Tipo creado: Gasto"))
+        else:
+            self.stdout.write("Tipo existente: Gasto")
+        vivienda_cat, vivienda_created = Category.objects.get_or_create(name="Vivienda", record_type=gasto_type)
+        if vivienda_created:
+            self.stdout.write(self.style.SUCCESS("  - Categoría creada: Vivienda (Gasto)"))
+        else:
+            self.stdout.write("  - Categoría existente: Vivienda (Gasto)")
+        
         self.stdout.write(self.style.SUCCESS('¡Carga de datos completada exitosamente!'))

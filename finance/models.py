@@ -82,6 +82,7 @@ class FinancialRecordMetadata(models.Model):
     ]
 
     financial_record = models.OneToOneField(FinancialRecord, on_delete=models.CASCADE)
+    currency = models.ForeignKey('users.Currency', on_delete=models.PROTECT, null=True, blank=True)
     frequency_type = models.CharField(max_length=10, choices=FREQUENCY_TYPES, null=True, blank=True)
     frequency_value = models.IntegerField(null=True, blank=True)
     next_occurrence = models.DateField(null=True, blank=True)
