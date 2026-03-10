@@ -6,6 +6,8 @@ from users.models import Currency
 class UserFinanceDashboard(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="dashboards")
     currency = models.ForeignKey(Currency, on_delete=models.SET_NULL, null=True, blank=True)
+    name = models.CharField(max_length=100, default="", blank=True)
+    description = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -16,4 +18,5 @@ class UserFinanceDashboard(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Dashboard {self.id} for {self.user_id}"
+        display = self.name or f"Dashboard {self.id}"
+        return f"{display} for {self.user_id}"

@@ -1,17 +1,36 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework import viewsets, status
 from django.utils import timezone
 from datetime import date, timedelta
 from django.db.models import Sum
+from django.db.models.deletion import ProtectedError
+from django.shortcuts import get_object_or_404
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+
 from .models import UserFinanceDashboard
 from finance.models import FinancialRecord
-from .serializers import DashboardSerializer, FinancialRecordLiteSerializer
+from .serializers import DashboardSerializer, FinancialRecordLiteSerializer, DashboardBasicSerializer
+from finance.serializers import FinancialRecordSerializer
 
 
 class CurrentDashboardView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        operation_id="dashboard_current",
+        description="Get current period dashboard summary (income, expenses, balance, and pending records) for the authenticated user.",
+        parameters=[
+            OpenApiParameter(
+                name="period",
+                type=str,
+                required=False,
+                description="Period type: 'month' (default) or 'year'.",
+            ),
+        ],
+        responses={200: DashboardSerializer},
+    )
     def _period_range(self, today, period_type):
         if period_type == "year":
             start = date(today.year, 1, 1)
@@ -66,3 +85,48 @@ class CurrentDashboardView(APIView):
             "pending_to_pay": FinancialRecordLiteSerializer(pend, many=True).data,
         }
         return Response(payload)
+
+
+class DashboardViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = DashboardBasicSerializer
+
+    def get_queryset(self):
+        return UserFinanceDashboard.objects.filter(user=self.request.user).order_by("-updated_at")
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        try:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ProtectedError:
+            return Response(
+                {"detail": "Cannot delete dashboard with linked financial records."},
+                status=status.HTTP_409_CONFLICT
+            )
+
+
+class DashboardRecordsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="dashboard_records_list",
+        description="List financial records (with metadata) for a given dashboard belonging to the authenticated user.",
+        responses={200: FinancialRecordSerializer},
+    )
+    def get(self, request, pk):
+        dashboard = get_object_or_404(
+            UserFinanceDashboard.objects.filter(user=request.user),
+            pk=pk,
+        )
+        records = FinancialRecord.objects.filter(dashboard=dashboard).select_related(
+            "record_type",
+            "category",
+            "payment_method",
+            "payment_status",
+        )
+        serializer = FinancialRecordSerializer(records, many=True, context={"request": request})
+        return Response(serializer.data)
