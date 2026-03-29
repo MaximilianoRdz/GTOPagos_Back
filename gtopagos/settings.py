@@ -148,6 +148,7 @@ SIMPLE_JWT = {
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_ALL_ORIGINS = True  # Only for development
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:4200",
 ]
 
 # ReDoc settings
