@@ -11,28 +11,37 @@ class FinancialRecordLiteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FinancialRecord
-        fields = ["id", "amount", "description", "record_date", "category", "payment_status", "record_type"]
+        fields = ["id", "amount", "description", "record_date", "category", "payment_status", "record_type", "is_recurrent", "current_installment", "total_installments"]
+
+class CategorySummarySerializer(serializers.Serializer):
+    name = serializers.CharField()
+    total_amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    total_records = serializers.IntegerField()
+    paid_records = serializers.IntegerField()
+    pending_amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+
+class BehaviorSummarySerializer(serializers.Serializer):
+    total_amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    total_records = serializers.IntegerField()
+    paid_amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    paid_records = serializers.IntegerField()
+    pending_amount = serializers.DecimalField(max_digits=15, decimal_places=2)
+    pending_records = serializers.IntegerField()
+    categories = CategorySummarySerializer(many=True)
+
+
+class CurrentPeriodSummarySerializer(serializers.Serializer):
+    period_type = serializers.CharField()
+    period_start = serializers.DateField()
+    total_income = serializers.DecimalField(max_digits=15, decimal_places=2)
+    total_expense = serializers.DecimalField(max_digits=15, decimal_places=2)
+    balance = serializers.DecimalField(max_digits=15, decimal_places=2)
+    expense_summary = BehaviorSummarySerializer()
+    income_summary = BehaviorSummarySerializer()
+    pending_to_pay = FinancialRecordLiteSerializer(many=True)
 
 
 class DashboardSerializer(serializers.ModelSerializer):
-    pending_to_pay = FinancialRecordLiteSerializer(many=True)
-
-    class Meta:
-        model = UserFinanceDashboard
-        fields = [
-            "id",
-            "name",
-            "description",
-            "period_type",
-            "period_start",
-            "total_income",
-            "total_expense",
-            "balance",
-            "pending_to_pay",
-        ]
-
-
-class DashboardBasicSerializer(serializers.ModelSerializer):
     currency_id = serializers.PrimaryKeyRelatedField(
         source="currency",
         queryset=Currency.objects.all(),
@@ -41,39 +50,30 @@ class DashboardBasicSerializer(serializers.ModelSerializer):
     )
     name = serializers.CharField(required=False, allow_blank=True)
     description = serializers.CharField(required=False, allow_blank=True)
+    dashboard_type = serializers.ChoiceField(
+        choices=UserFinanceDashboard.DASHBOARD_TYPE_CHOICES,
+        default='BOTH',
+        required=False
+    )
     total_income = serializers.SerializerMethodField()
     total_expense = serializers.SerializerMethodField()
     balance = serializers.SerializerMethodField()
     records_count = serializers.SerializerMethodField()
 
-    def _classify_totals(self, qs):
-        total_income = 0
-        total_expense = 0
-        for rec in qs.select_related("record_type"):
-            name = (rec.record_type.name or "").lower()
-            if any(k in name for k in ["income", "ingres", "percep"]):
-                total_income += rec.amount or 0
-            elif any(k in name for k in ["expense", "egres", "deduc"]):
-                total_expense += rec.amount or 0
-        return total_income, total_expense
-
     def get_total_income(self, obj):
-        qs = obj.financial_records.all()
-        income, _ = self._classify_totals(qs)
-        return income
+        # Lee el valor anotado por la vista, o calcula si no existe
+        return getattr(obj, 'total_income', 0) or 0
 
     def get_total_expense(self, obj):
-        qs = obj.financial_records.all()
-        _, expense = self._classify_totals(qs)
-        return expense
+        return getattr(obj, 'total_expense', 0) or 0
 
     def get_balance(self, obj):
-        qs = obj.financial_records.all()
-        income, expense = self._classify_totals(qs)
+        income = getattr(obj, 'total_income', 0) or 0
+        expense = getattr(obj, 'total_expense', 0) or 0
         return income - expense
 
     def get_records_count(self, obj):
-        return obj.financial_records.count()
+        return getattr(obj, 'records_count', 0) or 0
 
     class Meta:
         model = UserFinanceDashboard
@@ -81,7 +81,9 @@ class DashboardBasicSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "description",
+            "monthly_budget",
             "currency_id",
+            "dashboard_type",
             "total_income",
             "total_expense",
             "balance",

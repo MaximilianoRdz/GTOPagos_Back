@@ -15,6 +15,7 @@ class PaymentMethod(models.Model):
 
 class PaymentStatus(models.Model):
     status = models.CharField(max_length=50)
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True)
     color = models.CharField(max_length=7, default="#000000")  # Hex color code
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)

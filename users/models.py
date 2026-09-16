@@ -101,6 +101,19 @@ class UserProfile(models.Model):
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True)
     income_frequency = models.ForeignKey(IncomeFrequency, on_delete=models.PROTECT, null=True, blank=True, related_name="profiles")
 
+    # Notification Preferences
+    notification_method = models.CharField(
+        max_length=10, 
+        choices=[('email', 'Email'), ('sms', 'SMS'), ('both', 'Both')], 
+        default='email'
+    )
+    budget_alerts = models.BooleanField(default=True)
+    goal_reminders = models.BooleanField(default=True)
+    weekly_reports = models.BooleanField(default=False)
+    monthly_reports = models.BooleanField(default=True)
+    transaction_alerts = models.BooleanField(default=True)
+    payment_reminders = models.BooleanField(default=True)
+
     class Meta:
         indexes = [
             models.Index(fields=['salary']),

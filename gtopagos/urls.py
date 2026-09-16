@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView
+from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from django.conf import settings
 from django.views.generic import TemplateView
 import sys
@@ -28,10 +28,10 @@ urlpatterns = [
     path('api/', include('finance.urls')),
     path('api/', include('payments.urls')),
     path('api/', include('dashboard.urls')),
-    # API Schema
+    # API Schema & Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    # Solo ReDoc UI
     path('api/docs/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('api/docs/swagger/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 ]
 
 if settings.DEBUG:

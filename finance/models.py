@@ -1,13 +1,20 @@
 from django.db import models
 from django.core.validators import MinValueValidator
 from django.utils import timezone
+from decimal import Decimal
 from datetime import timedelta
 from users.models import User
 
 
 class FinancialRecordType(models.Model):
+    BEHAVIOR_CHOICES = [
+        ('INCOME', 'Income'),
+        ('EXPENSE', 'Expense'),
+        ('TRANSFER', 'Transfer'),
+    ]
     name = models.CharField(max_length=50, unique=True)
     description = models.TextField(blank=True)
+    behavior = models.CharField(max_length=20, choices=BEHAVIOR_CHOICES, default='EXPENSE')
 
     class Meta:
         ordering = ['name']
@@ -19,14 +26,50 @@ class FinancialRecordType(models.Model):
 class Category(models.Model):
     name = models.CharField(max_length=50)
     record_type = models.ForeignKey(FinancialRecordType, on_delete=models.PROTECT)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True, related_name='custom_categories')
+    color = models.CharField(max_length=30, blank=True, default='')
+    icon = models.CharField(max_length=50, blank=True, default='')
 
     class Meta:
         verbose_name_plural = "Categories"
         ordering = ['record_type', 'name']
-        unique_together = ['name', 'record_type']
+        unique_together = ['name', 'record_type', 'user']
 
     def __str__(self):
         return self.name
+
+
+class CategoryKeyword(models.Model):
+    category = models.ForeignKey(Category, related_name='keywords', on_delete=models.CASCADE)
+    keyword = models.CharField(max_length=100)
+
+    class Meta:
+        unique_together = ['category', 'keyword']
+        ordering = ['category', 'keyword']
+
+    def clean(self):
+        if self.keyword:
+            self.keyword = self.keyword.strip().lower()
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.keyword} -> {self.category.name}"
+
+
+class FinancialGoal(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='financial_goals')
+    name = models.CharField(max_length=255)
+    target_amount = models.DecimalField(max_digits=15, decimal_places=2)
+    saved_amount = models.DecimalField(max_digits=15, decimal_places=2, default=0.00)
+    target_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.user.email}"
 
 
 class FinancialRecord(models.Model):
@@ -36,10 +79,14 @@ class FinancialRecord(models.Model):
     category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True, blank=True)
     payment_method = models.ForeignKey('payments.PaymentMethod', on_delete=models.SET_NULL, null=True, blank=True)
     payment_status = models.ForeignKey('payments.PaymentStatus', on_delete=models.SET_NULL, null=True, blank=True)
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
     description = models.TextField(blank=True)
     record_date = models.DateField()
     is_recurrent = models.BooleanField(default=False)
+    current_installment = models.PositiveIntegerField(null=True, blank=True)
+    total_installments = models.PositiveIntegerField(null=True, blank=True)
+    financial_goal = models.ForeignKey(FinancialGoal, on_delete=models.SET_NULL, null=True, blank=True, related_name='linked_records')
+    is_active = models.BooleanField(default=True, db_index=True)
     created_by = models.ForeignKey(User, related_name="created_records", on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -64,6 +111,13 @@ class FinancialRecord(models.Model):
                 )
         if self.dashboard and self.dashboard.user_id != self.user_id:
             raise ValidationError("El dashboard pertenece a otro usuario")
+        if self.dashboard and not self.dashboard.is_active:
+            raise ValidationError("No se pueden agregar o editar registros en un dashboard desactivado/archivado")
+        if self.dashboard and self.record_type:
+            if self.dashboard.dashboard_type == 'INCOME' and self.record_type.behavior == 'EXPENSE':
+                raise ValidationError("No se permiten movimientos de tipo gasto en un dashboard de solo ingresos.")
+            elif self.dashboard.dashboard_type == 'EXPENSES' and self.record_type.behavior == 'INCOME':
+                raise ValidationError("No se permiten movimientos de tipo ingreso en un dashboard de solo gastos.")
 
     def save(self, *args, **kwargs):
         self.clean()
