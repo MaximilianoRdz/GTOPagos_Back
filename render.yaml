@@ -1,0 +1,28 @@
+﻿services:
+  - type: web
+    name: gtopagos-backend
+    runtime: python
+    plan: free
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn gtopagos.wsgi:application"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gtopagos-db
+          property: connectionString
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: ".onrender.com,localhost,127.0.0.1"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "http://localhost:4200,https://gtopagos.vercel.app"
+
+databases:
+  - name: gtopagos-db
+    databaseName: gtopagos
+    user: postgres
+    plan: free

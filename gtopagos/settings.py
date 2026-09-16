@@ -50,6 +50,15 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+# Enable WhiteNoise if installed (for production static files serving)
+try:
+    import whitenoise
+    MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")
+    STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+except ImportError:
+    pass
+
+
 ROOT_URLCONF = "gtopagos.urls"
 
 TEMPLATES = [
@@ -71,17 +80,34 @@ TEMPLATES = [
 WSGI_APPLICATION = "gtopagos.wsgi.application"
 
 # Database
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME", "gtopagos"),
-        "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", ""),
-        "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5433"),
-        "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+DATABASE_URL = os.getenv("DATABASE_URL")
+if DATABASE_URL:
+    import urllib.parse
+    parsed_db_url = urllib.parse.urlparse(DATABASE_URL)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": parsed_db_url.path.lstrip("/"),
+            "USER": parsed_db_url.username,
+            "PASSWORD": parsed_db_url.password,
+            "HOST": parsed_db_url.hostname,
+            "PORT": str(parsed_db_url.port or "5432"),
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("DB_NAME", "gtopagos"),
+            "USER": os.getenv("DB_USER", "postgres"),
+            "PASSWORD": os.getenv("DB_PASSWORD", ""),
+            "HOST": os.getenv("DB_HOST", "localhost"),
+            "PORT": os.getenv("DB_PORT", "5433"),
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        }
+    }
+
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
@@ -111,6 +137,8 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+
+
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -169,6 +197,12 @@ if CORS_ALLOWED_ORIGINS_ENV:
 else:
     CORS_ALLOW_ALL_ORIGINS = DEBUG
     CORS_ALLOWED_ORIGINS = []
+
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "bypass-tunnel-reminder",
+]
+
 
 # ReDoc settings
 SPECTACULAR_SETTINGS = {
