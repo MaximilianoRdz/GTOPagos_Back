@@ -198,6 +198,12 @@ else:
     CORS_ALLOW_ALL_ORIGINS = DEBUG
     CORS_ALLOWED_ORIGINS = []
 
+from corsheaders.defaults import default_headers
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "bypass-tunnel-reminder",
+]
+
+
 # ReDoc settings
 SPECTACULAR_SETTINGS = {
     "TITLE": "GTOPagos API",
