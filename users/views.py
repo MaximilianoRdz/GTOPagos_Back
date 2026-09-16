@@ -1,14 +1,28 @@
 from rest_framework import viewsets, status
-from .models import Currency, User, IncomeFrequency, UserProfile
-from .serializers import CurrencySerializer, UserLoginSerializer, UserSerializer, IncomeFrequencySerializer, UserProfileSerializer
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import JSONParser
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 from drf_spectacular.utils import extend_schema, OpenApiResponse
-from datetime import datetime
-from rest_framework.permissions import IsAuthenticated
-from .serializers import ChangePasswordSerializer
+from django.core.mail import send_mail
+from django.conf import settings
+from django.utils import timezone
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+
+from .models import Currency, User, IncomeFrequency, UserProfile
+from .serializers import (
+    CurrencySerializer,
+    UserLoginSerializer,
+    UserSerializer,
+    IncomeFrequencySerializer,
+    UserProfileSerializer,
+    ChangePasswordSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetConfirmSerializer,
+)
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Currency.objects.all()
@@ -34,54 +48,16 @@ class TokenValidateView(APIView):
         }
     )
     def post(self, request):
-        try:
-            # Obtener el token del header de autorización
-            auth_header = request.headers.get('Authorization')
-            if not auth_header or not auth_header.startswith('Bearer '):
-                return Response({
-                    "detail": "Se requiere un token de acceso",
-                    "code": "token_missing"
-                }, status=400)
-            
-            # Extraer el token
-            access_token = auth_header.split(' ')[1]
-            
-            # Validar el token
-            token = AccessToken(access_token)
-            
-            # Verificar que el token no haya expirado
-            if token['exp'] < datetime.now().timestamp():
-                return Response({
-                    "detail": "El token ha expirado",
-                    "code": "token_expired"
-                }, status=400)
-            
-            # Verificar que el usuario existe
-            user_id = token['user_id']
-            try:
-                user = User.objects.select_related('profile').get(id=user_id, is_active=True)
-            except User.DoesNotExist:
-                return Response({
-                    "detail": "Usuario no encontrado o inactivo",
-                    "code": "user_not_found"
-                }, status=400)
-            
-            # Si llegamos aquí, el token es válido
-            return Response({
-                "detail": "Token válido",
-                "code": "token_valid",
-                "user_id": user_id,
-                "user": {
-                    "email": user.email
-                }
-            })
-            
-        except Exception as e:
-            return Response({
-                "detail": "Token inválido",
-                "code": "token_invalid",
-                "error": str(e)
-            }, status=400)
+        user = request.user
+        return Response({
+            "detail": "Token válido",
+            "code": "token_valid",
+            "user_id": user.id,
+            "user": {
+                "email": user.email,
+                "name": user.get_short_name() or "Usuario"
+            }
+        }, status=status.HTTP_200_OK)
 
 class UserRegisterView(APIView):
     permission_classes = []
@@ -304,4 +280,150 @@ class ChangePasswordView(APIView):
             )
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id='password_reset_request',
+        description='Solicita un enlace de recuperación de contraseña enviado por correo electrónico.',
+        request=PasswordResetRequestSerializer,
+        responses={200: OpenApiResponse(description='Correo de recuperación procesado.')}
+    )
+    def post(self, request):
+        serializer = PasswordResetRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        email = serializer.validated_data['email']
+        user = User.objects.filter(email__iexact=email, is_active=True).first()
+
+        if user:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:4200').rstrip('/')
+            reset_url = f"{frontend_url}/reset-password?uid={uid}&token={token}"
+
+            user_name = user.get_short_name() or user.email
+
+            subject = "Recuperación de contraseña - GTOPagos"
+            message_plain = (
+                f"Hola {user_name},\n\n"
+                f"Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en GTOPagos.\n\n"
+                f"Para crear una nueva contraseña, haz clic en el siguiente enlace:\n"
+                f"{reset_url}\n\n"
+                f"Este enlace es válido por 24 horas y solo puede utilizarse una vez.\n\n"
+                f"Si tú no solicitaste este cambio, puedes ignorar este correo de forma segura.\n\n"
+                f"Atentamente,\nEl equipo de GTOPagos"
+            )
+
+            message_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; margin: 0; padding: 24px; color: #1e293b;">
+              <table width="100%" border="0" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center">
+                    <table width="600" border="0" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #e2e8f0;">
+                      <tr>
+                        <td style="background: linear-gradient(135deg, #059669 0%, #0d9488 50%, #0284c7 100%); padding: 32px 40px; text-align: center;">
+                          <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px;">GTOPagos</h1>
+                          <p style="color: #e0f2fe; margin: 8px 0 0 0; font-size: 14px;">Gestión Financiera Inteligente</p>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 40px;">
+                          <h2 style="font-size: 20px; font-weight: 700; color: #0f172a; margin-top: 0; margin-bottom: 16px;">Restablecer tu contraseña</h2>
+                          <p style="font-size: 15px; line-height: 1.6; color: #475569; margin-bottom: 24px;">
+                            Hola <strong>{user_name}</strong>,<br><br>
+                            Recibimos una solicitud para restablecer la contraseña de tu cuenta. Haz clic en el botón de abajo para definir una nueva contraseña:
+                          </p>
+                          <div style="text-align: center; margin: 32px 0;">
+                            <a href="{reset_url}" target="_blank" style="background: linear-gradient(135deg, #059669 0%, #0d9488 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 12px; font-size: 15px; font-weight: 700; display: inline-block; box-shadow: 0 4px 12px rgba(13, 148, 136, 0.3);">
+                              Restablecer mi Contraseña
+                            </a>
+                          </div>
+                          <p style="font-size: 13px; line-height: 1.5; color: #64748b; margin-bottom: 16px;">
+                            Si el botón no funciona, copia y pega el siguiente enlace en tu navegador:<br>
+                            <a href="{reset_url}" style="color: #0d9488; word-break: break-all;">{reset_url}</a>
+                          </p>
+                          <div style="background-color: #f1f5f9; border-left: 4px solid #0d9488; padding: 12px 16px; border-radius: 4px; margin-top: 24px;">
+                            <p style="margin: 0; font-size: 12px; color: #475569;">
+                              <strong>Nota de seguridad:</strong> Este enlace expira en 24 horas y solo puede usarse una vez. Si no hiciste esta solicitud, puedes ignorar este correo.
+                            </p>
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="background-color: #f8fafc; padding: 20px 40px; text-align: center; border-top: 1px solid #f1f5f9;">
+                          <p style="margin: 0; font-size: 12px; color: #94a3b8;">
+                            © {timezone.now().year} GTOPagos. Todos los derechos reservados.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+            </html>
+            """
+
+            try:
+                send_mail(
+                    subject=subject,
+                    message=message_plain,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[user.email],
+                    html_message=message_html,
+                    fail_silently=False,
+                )
+            except Exception as e:
+                print(f"Error sending password reset email: {e}")
+
+        return Response(
+            {"message": "Si tu correo se encuentra registrado, recibirás un enlace con las instrucciones para restablecer tu contraseña."},
+            status=status.HTTP_200_OK
+        )
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id='password_reset_confirm',
+        description='Confirma y actualiza la nueva contraseña utilizando el token criptográfico y UID recibido.',
+        request=PasswordResetConfirmSerializer,
+        responses={200: OpenApiResponse(description='Contraseña actualizada con éxito.')}
+    )
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {"message": "Tu contraseña ha sido restablecida exitosamente. Ya puedes iniciar sesión con tu nueva contraseña."},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DemoLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        operation_id='demo_login',
+        description='Inicia sesión inmediatamente como usuario de prueba (Demo) con datos precargados.',
+        responses={200: UserSerializer}
+    )
+    def post(self, request):
+        from .demo_data import ensure_demo_user_and_data
+        demo_user = ensure_demo_user_and_data()
+        access_token = AccessToken.for_user(demo_user)
+
+        return Response({
+            "user": UserSerializer(demo_user).data,
+            "access_token": str(access_token),
+            "is_demo": True
+        }, status=status.HTTP_200_OK)
 

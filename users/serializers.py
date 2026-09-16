@@ -2,6 +2,11 @@ from rest_framework import serializers
 from .models import Currency, User, UserProfile, IncomeFrequency
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import MinLengthValidator
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 class CurrencySerializer(serializers.ModelSerializer):
     class Meta:
@@ -35,11 +40,19 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "salary",
             "currency_id",
             "income_frequency_id",
+            "notification_method",
+            "budget_alerts",
+            "goal_reminders",
+            "weekly_reports",
+            "monthly_reports",
+            "transaction_alerts",
+            "payment_reminders",
         ]
 
 
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(read_only=True)
+    name = serializers.SerializerMethodField()
     password = serializers.CharField(
         write_only=True,
         required=True,
@@ -55,11 +68,14 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'password', 'confirm_password', 
+            'id', 'email', 'name', 'password', 'confirm_password', 
             'is_active', 'last_login', 'created_at', 'updated_at',
             'profile'
         ]
         read_only_fields = ['id', 'last_login', 'created_at', 'updated_at']
+
+    def get_name(self, obj):
+        return obj.get_short_name() or "Usuario"
 
     def validate(self, data):
         # Solo validar confirm_password si se proporciona
@@ -133,3 +149,62 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.password = make_password(self.validated_data['new_password'])
         user.save()
         return user
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        return value.strip().lower()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={'input_type': 'password'}
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        min_length=8,
+        style={'input_type': 'password'}
+    )
+
+    def validate(self, data):
+        if data['new_password'] != data['confirm_password']:
+            raise serializers.ValidationError({
+                "confirm_password": "Las contraseñas no coinciden"
+            })
+
+        # Decodificar el UID
+        try:
+            user_id = force_str(urlsafe_base64_decode(data['uid']))
+            user = User.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError({
+                "token": "El enlace de recuperación es inválido o el usuario no existe."
+            })
+
+        # Verificar token criptográfico
+        if not default_token_generator.check_token(user, data['token']):
+            raise serializers.ValidationError({
+                "token": "El enlace de recuperación es inválido o ha expirado."
+            })
+
+        # Validar complejidad de contraseña según validadores configurados de Django
+        try:
+            validate_password(data['new_password'], user=user)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError({
+                "new_password": list(e.messages)
+            })
+
+        self.user = user
+        return data
+
+    def save(self, **kwargs):
+        self.user.set_password(self.validated_data['new_password'])
+        self.user.save()
+        return self.user
