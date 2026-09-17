@@ -48,4 +48,9 @@ ENV/
 
 # OS
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Database Backups
+backups/
+*.sql
+*.sql.gz
