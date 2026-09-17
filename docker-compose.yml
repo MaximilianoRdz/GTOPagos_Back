@@ -41,14 +41,15 @@ services:
     volumes:
       - media_data:/app/media
 
-  frontend:
-    build:
-      context: ../GTOPagos
-      dockerfile: Dockerfile
-    container_name: gtopagos_frontend
+  nginx:
+    image: nginx:alpine
+    container_name: gtopagos_nginx
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-80}:80"
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - media_data:/app/media:ro
     depends_on:
       - backend
 
