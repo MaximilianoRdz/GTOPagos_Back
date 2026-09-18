@@ -15,7 +15,7 @@ if %errorLevel% neq 0 (
 )
 
 netsh advfirewall firewall delete rule name="GTOPagos Proxy 1450" >nul 2>&1
-netsh advfirewall firewall add rule name="GTOPagos Proxy 1450" dir=in action=allow protocol=TCP localport=1450 profile=private,public
+netsh advfirewall firewall add rule name="GTOPagos Proxy 1450" dir=in action=allow protocol=TCP localport=1450 profile=any
 
 echo.
 echo [EXITO] Regla de firewall para el puerto 1450 configurada exitosamente.
