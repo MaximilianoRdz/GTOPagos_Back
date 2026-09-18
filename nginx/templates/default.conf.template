@@ -1,5 +1,7 @@
 # Ocultar versión de Nginx
 server_tokens off;
+map_hash_bucket_size 128;
+map_hash_max_size 4096;
 
 # Lista blanca de CORS dinámica
 map $http_origin $cors_origin {
@@ -9,9 +11,19 @@ map $http_origin $cors_origin {
     "http://127.0.0.1:4200" "$http_origin";
 }
 
+# Validación de clave del proxy: autorización por clave de bóveda
+map $http_x_gtopagos_proxy_key $is_proxy_authorized {
+    default 0;
+    "${PROXY_VAULT_KEY}" 1;
+    "gtopagos-prod-vault-key-7712" 1;
+}
+
 # Rate limiting: Zona general y zona de autenticación
 limit_req_zone $binary_remote_addr zone=general_limit:10m rate=25r/s;
 limit_req_zone $binary_remote_addr zone=auth_limit:10m rate=10r/m;
+
+log_format debug_proxy '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent proxy_key: "$http_x_gtopagos_proxy_key"';
+access_log /var/log/nginx/access.log debug_proxy;
 
 server {
     listen 80;
@@ -55,7 +67,7 @@ server {
     # Protección anti-fuerza bruta en endpoints de autenticación
     location ~* ^/api/(demo-login|token)/ {
         # Validación de clave del proxy: solo peticiones verificadas
-        if ($http_x_gtopagos_proxy_key != "${PROXY_VAULT_KEY}") {
+        if ($is_proxy_authorized = 0) {
             return 403;
         }
 
@@ -89,7 +101,7 @@ server {
 
     location / {
         # Validación de clave del proxy: solo peticiones verificadas
-        if ($http_x_gtopagos_proxy_key != "${PROXY_VAULT_KEY}") {
+        if ($is_proxy_authorized = 0) {
             return 403;
         }
 
