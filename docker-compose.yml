@@ -24,8 +24,8 @@ services:
     container_name: gtopagos_backend
     restart: unless-stopped
     environment:
-      DEBUG: ${DEBUG:-False}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-gtopagos-secret-key-prod-random-2026}
+      DEBUG: "False"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-xqxxpV8gbw5UBrqDYuGaEuc6MuqEj7DkHyTjT_c4aHlkPpzr2Vog3XE_cNtDS8Riwtw}
       DB_NAME: ${DB_NAME:-gtopagos}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres123}
