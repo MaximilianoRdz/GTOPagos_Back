@@ -54,3 +54,8 @@ Thumbs.db
 backups/
 *.sql
 *.sql.gz
+
+# Agent & Workspace Cache
+.agents/
+.autohand/
+skills-lock.json
