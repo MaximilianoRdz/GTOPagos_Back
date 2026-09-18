@@ -3,6 +3,8 @@ services:
     image: postgres:16-alpine
     container_name: gtopagos_db
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       POSTGRES_DB: ${DB_NAME:-gtopagos}
       POSTGRES_USER: ${DB_USER:-postgres}
@@ -23,17 +25,19 @@ services:
       dockerfile: Dockerfile
     container_name: gtopagos_backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      DEBUG: "False"
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-xqxxpV8gbw5UBrqDYuGaEuc6MuqEj7DkHyTjT_c4aHlkPpzr2Vog3XE_cNtDS8Riwtw}
+      DEBUG: ${DEBUG:-False}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
       DB_NAME: ${DB_NAME:-gtopagos}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres123}
       DB_HOST: db
       DB_PORT: "5432"
-      ALLOWED_HOSTS: "api.maxrdzs.com,localhost,127.0.0.1,backend"
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       CORS_ALLOW_ALL_ORIGINS: "False"
-      CORS_ALLOWED_ORIGINS: "https://gtopagos.maxrdzs.com,http://localhost:4200,http://127.0.0.1:4200"
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:4200,http://127.0.0.1:4200}
     depends_on:
       db:
         condition: service_healthy
@@ -46,11 +50,17 @@ services:
     image: nginx:alpine
     container_name: gtopagos_nginx
     restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:4200}
+      - PROXY_VAULT_KEY=${PROXY_VAULT_KEY}
+      - NGINX_ENVSUBST_FILTER=FRONTEND_URL|PROXY_VAULT_KEY
     ports:
       - "${NGINX_PORT:-80}:80"
-      - "1451:80"
+      - "${EXTERNAL_PORT:-1451}:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
       - media_data:/app/media:ro
     depends_on:
       - backend

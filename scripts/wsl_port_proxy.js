@@ -1,8 +1,8 @@
 const net = require('net');
 
-const LISTEN_PORT = 1450;
-const TARGET_PORT = 1451;
-const TARGET_HOST = '127.0.0.1';
+const LISTEN_PORT = process.env.PROXY_PORT ? parseInt(process.env.PROXY_PORT, 10) : 1450;
+const TARGET_PORT = process.env.EXTERNAL_PORT ? parseInt(process.env.EXTERNAL_PORT, 10) : 1451;
+const TARGET_HOST = process.env.TARGET_HOST || '127.0.0.1';
 
 const server = net.createServer((clientSocket) => {
   const targetSocket = net.connect(TARGET_PORT, TARGET_HOST, () => {

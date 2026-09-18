@@ -1,7 +1,7 @@
 Set WshShell = CreateObject("WScript.Shell")
 
 ' 1. Asegurar inicio de WSL2, esperar al demonio de Docker y levantar contenedores
-WshShell.Run "wsl.exe -d Ubuntu bash -c ""for i in {1..30}; do docker info > /dev/null 2>&1 && break || sleep 1; done; docker compose -f /mnt/c/Users/MaxRo/OneDrive/Escritorio/GTOPagos_Back/docker-compose.yml up -d""", 0, True
+WshShell.Run "wsl.exe -d Ubuntu bash -c ""cd /mnt/c/Users/MaxRo/OneDrive/Escritorio/GTOPagos_Back && for i in {1..30}; do docker info > /dev/null 2>&1 && break || sleep 1; done; docker compose up -d""", 0, True
 
 ' 2. Esperar a que la red y servicios levanten
 WScript.Sleep 2000

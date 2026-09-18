@@ -5,7 +5,7 @@ echo  Iniciando Servidor GTOPagos (Docker + Proxy 1450)
 echo ====================================================
 echo.
 echo 1. Levantando base de datos y backend en Docker...
-wsl.exe -d Ubuntu docker compose -f /mnt/c/Users/MaxRo/OneDrive/Escritorio/GTOPagos_Back/docker-compose.yml up -d
+wsl.exe -d Ubuntu bash -c "cd /mnt/c/Users/MaxRo/OneDrive/Escritorio/GTOPagos_Back && docker compose up -d"
 echo.
 echo 2. Limpiando procesos previos en puerto 1450...
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :1450 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
