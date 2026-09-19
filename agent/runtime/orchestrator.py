@@ -1,11 +1,11 @@
 """
 GTOPagos AI Runtime & Orchestrator
 Coordina la interacción del usuario con las herramientas MCP, Skills financieras y modelos LLM.
-Diseñado bajo el principio de Zero-Cost y Zero-Hallucination:
-- Todos los cálculos matemáticos se delegan a Skills tipadas (SDD) vía MCP.
-- Funciona 100% de manera autónoma en modo heurístico local (sin necesidad de API Keys ni servicios de pago).
-- Soporta integración plug-and-play con Ollama local (Llama 3.2 / Mistral) o Google Gemini Flash API.
-- Genera bloques estructurados de Generative UI listos para renderizarse en Angular 21.
+Diseñado bajo el principio de Zero-Cost, Zero-Hallucination y Alta Inteligencia Conversacional:
+- Conexión directa a los datos REALES del usuario autenticado (Saldos, Gastos, Metas, Salario).
+- Detección precisa de intenciones (Saludos, Resumen de Cuentas, Metas, Pagos Pendientes, MSI, Conceptos Financieros).
+- Integración plug-and-play con Google Gemini 1.5 Flash (Free Tier) u Ollama local cuando se proporciona API Key.
+- Cero alucinaciones matemáticas: los cálculos se procesan en las Skills tipadas de MCP.
 """
 import re
 import os
@@ -14,6 +14,8 @@ import logging
 from decimal import Decimal, InvalidOperation
 from datetime import date, timedelta
 from typing import Dict, Any, Optional, List
+import urllib.request
+import urllib.error
 
 from agent.specs.schemas import (
     MSICalculatorInput,
@@ -37,7 +39,7 @@ class FinancialAIOrchestrator:
     def __init__(self):
         self.mcp = mcp_server
         self.system_name = "GTOPagos Financial Agent"
-        self.version = "1.0.0"
+        self.version = "1.1.0"
 
     def process_query(self, user_query: str, user=None, context: Optional[Dict[str, Any]] = None) -> AgentActionResponse:
         """
@@ -55,49 +57,102 @@ class FinancialAIOrchestrator:
 
         query_lower = query.lower()
 
-        # 1. Detección de Intención: Meses Sin Intereses (MSI)
+        # 1. Saludos y cortesía ("hola", "buenos días", "qué tal", "cómo estás")
+        if self._is_greeting(query_lower):
+            return self._handle_greeting_intent(user)
+
+        # 2. Preguntas sobre identidad o capacidades ("quién eres", "qué puedes hacer", "ayuda")
+        if self._is_identity_or_help_query(query_lower):
+            return self._handle_identity_intent()
+
+        # 3. Consultas sobre datos reales del usuario (Saldo, Gastos, Ingresos del mes)
+        if self._is_user_balance_or_summary_query(query_lower):
+            return self._handle_user_summary_intent(user, query_lower)
+
+        # 4. Consultas sobre Metas de ahorro reales del usuario ("cómo van mis metas", "mis metas")
+        if self._is_user_goals_query(query_lower):
+            return self._handle_user_goals_intent(user)
+
+        # 5. Meses Sin Intereses (MSI) explícitos
         msi_match = self._match_msi_query(query)
         if msi_match:
             return self._handle_msi_intent(msi_match)
 
-        # 2. Detección de Intención: Semáforo / Priorización de Vencimientos
+        # 6. Semáforo / Priorización de Vencimientos y Deudas
         if self._is_due_date_priority_query(query_lower):
             return self._handle_due_date_priority_intent(user, query_lower)
 
-        # 3. Detección de Intención: Flujo de caja / Proyección quincenal
+        # 7. Flujo de caja / Proyección quincenal
         if self._is_cashflow_query(query_lower):
             return self._handle_cashflow_intent(query, user)
 
-        # 4. Detección de Intención: Categorización de Gasto / Transacción
+        # 8. Categorización de Gasto / Transacción
         cat_match = self._match_categorize_query(query)
         if cat_match:
             return self._handle_categorize_intent(cat_match)
 
-        # 5. Detección de Intención: Consejos / Salud Financiera / Regla 50-30-20
-        if self._is_financial_advice_query(query_lower):
-            return self._handle_financial_advice_intent(query_lower)
+        # 9. Conceptos de Educación Financiera y Consejos (50/30/20, Bola de nieve, etc.)
+        advice_res = self._match_financial_advice(query_lower)
+        if advice_res:
+            return advice_res
 
-        # 6. Fallback Heurístico / Asistente General
-        return self._handle_general_fallback(query)
+        # 10. Si existe GEMINI_API_KEY configurada, consultar al LLM con contexto financiero
+        gemini_api_key = os.getenv("GEMINI_API_KEY")
+        if gemini_api_key:
+            llm_res = self._ask_gemini_llm(query, user, gemini_api_key)
+            if llm_res:
+                return llm_res
+
+        # 11. Fallback Heurístico Contextual (Inteligente y conversacional)
+        return self._handle_smart_conversational_fallback(query, user)
 
     # --------------------------------------------------------------------------
-    # MATCHERS & EXTRACTORS
+    # DETECTORES DE INTENCIÓN (INTENT CLASSIFIERS)
     # --------------------------------------------------------------------------
+
+    def _is_greeting(self, text: str) -> bool:
+        greetings = [
+            "hola", "buen dia", "buenos dias", "buenas tardes", "buenas noches",
+            "hey", "que tal", "qué tal", "saludos", "que onda", "qué onda", "hi", "hello"
+        ]
+        words = re.findall(r'\b\w+\b', text)
+        return any(w in words for w in greetings) and len(words) <= 5
+
+    def _is_identity_or_help_query(self, text: str) -> bool:
+        patterns = [
+            r'qui[eé]n eres',
+            r'qu[eé] puedes hacer',
+            r'qu[eé] haces',
+            r'para qu[eé] sirves',
+            r'c[oó]mo me puedes ayudar',
+            r'ayuda\b',
+            r'comandos\b',
+            r'funciones\b'
+        ]
+        return any(re.search(p, text) for p in patterns)
+
+    def _is_user_balance_or_summary_query(self, text: str) -> bool:
+        keywords = [
+            "cuanto dinero tengo", "cuánto dinero tengo", "cuanto tengo", "cuánto tengo",
+            "mi saldo", "saldo actual", "cuanto he gastado", "cuánto he gastado",
+            "mis gastos", "mis ingresos", "resumen de mis finanzas", "como voy este mes",
+            "cómo voy este mes", "estado de mis finanzas", "dinero disponible", "mi balance"
+        ]
+        return any(k in text for k in keywords)
+
+    def _is_user_goals_query(self, text: str) -> bool:
+        keywords = [
+            "mis metas", "metas de ahorro", "como van mis metas", "cómo van mis metas",
+            "mis objetivos", "mis ahorros", "cuanto he ahorrado", "cuánto he ahorrado"
+        ]
+        return any(k in text for k in keywords)
 
     def _match_msi_query(self, text: str) -> Optional[Dict[str, Any]]:
-        """
-        Detecta consultas de MSI como:
-        - "compré una tv de 15,000 a 12 meses sin intereses"
-        - "cuánto pago por 6000 a 6 cuotas"
-        - "calcular msi 12000 12 meses voy en la cuota 3"
-        """
         text_lower = text.lower()
         if not any(k in text_lower for k in ["msi", "meses sin intereses", "meses", "cuotas", "parcialidades"]):
             return None
 
-        # Extraer montos ($12,000 o 12000 o 12000.50)
         amount_match = re.search(r'(?:\$|\bde\s+)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:pesos|mxn)?', text, re.IGNORECASE)
-        # Extraer cuotas (a 12 meses, en 6 cuotas, 18 msi)
         installments_match = re.search(r'(?:a|en|de)?\s*(\d{1,2})\s*(?:msi|meses|cuotas|parcialidades)', text, re.IGNORECASE)
 
         if amount_match and installments_match:
@@ -107,12 +162,10 @@ class FinancialAIOrchestrator:
                 amount = Decimal(raw_amount)
                 installments = int(raw_inst)
                 if amount > Decimal('0.00') and 2 <= installments <= 72:
-                    # Extraer cuota actual si se especifica ("voy en la cuota 3", "llevo 2")
                     curr_match = re.search(r'(?:cuota|pago|mes)\s*(\d{1,2})', text_lower)
                     curr = int(curr_match.group(1)) if curr_match else 1
                     if curr > installments:
                         curr = 1
-
                     return {
                         "total_amount": amount,
                         "total_installments": installments,
@@ -126,7 +179,8 @@ class FinancialAIOrchestrator:
         keywords = [
             "vencimiento", "vencimientos", "vencen", "semaforo", "semáforo",
             "urgente", "prioridad de pago", "que debo pagar", "qué debo pagar",
-            "proximos pagos", "próximos pagos", "deudas por vencer"
+            "proximos pagos", "próximos pagos", "deudas por vencer", "mis deudas",
+            "pagos pendientes", "que pagos tengo"
         ]
         return any(k in text for k in keywords)
 
@@ -134,7 +188,7 @@ class FinancialAIOrchestrator:
         keywords = [
             "flujo de caja", "cashflow", "quincena", "corte 15", "corte 30",
             "solvencia", "liquidez", "cuanto me queda", "cuánto me queda",
-            "margen libre", "porcentaje comprometido"
+            "margen libre", "porcentaje comprometido", "me alcanza"
         ]
         return any(k in text for k in keywords)
 
@@ -150,17 +204,282 @@ class FinancialAIOrchestrator:
                 return m.group(1).strip()
         return None
 
-    def _is_financial_advice_query(self, text: str) -> bool:
-        keywords = [
-            "ahorrar", "ahorro", "regla 50", "50/30/20", "50-30-20",
-            "consejo", "reducir gastos", "como salir de deudas", "fondo de emergencia",
-            "salud financiera"
-        ]
-        return any(k in text for k in keywords)
+    # --------------------------------------------------------------------------
+    # MANEJADORES DE RESPUESTAS (INTENT HANDLERS)
+    # --------------------------------------------------------------------------
 
-    # --------------------------------------------------------------------------
-    # INTENT HANDLERS
-    # --------------------------------------------------------------------------
+    def _handle_greeting_intent(self, user) -> AgentActionResponse:
+        user_name = ""
+        if user and hasattr(user, "get_short_name") and user.get_short_name():
+            user_name = f", **{user.get_short_name()}**"
+        elif user and hasattr(user, "email"):
+            user_name = f", **{user.email.split('@')[0]}**"
+
+        message = (
+            f"👋 ¡Hola{user_name}! ¿Cómo estás?\n\n"
+            f"Soy tu **Asistente Financiero GTOPagos**. Estoy conectado directamente con tus movimientos para ayudarte a tomar mejores decisiones.\n\n"
+            f"¿Qué te gustaría revisar hoy?\n"
+            f"- 📊 *\"¿Cuánto he gastado este mes?\"*\n"
+            f"- 🚦 *\"¿Cuáles son mis pagos pendientes?\"*\n"
+            f"- 🎯 *\"¿Cómo van mis metas de ahorro?\"*\n"
+            f"- 💳 *\"Calcula una compra a meses sin intereses\"*"
+        )
+
+        return AgentActionResponse(
+            success=True,
+            thought="Saludo cálido y bienvenida contextual.",
+            action_type="READ_ONLY",
+            data={"widget_type": "assistant_capabilities", "capabilities": [
+                {"title": "Resumen Financiero", "example": "¿Cuánto he gastado este mes?"},
+                {"title": "Semáforo de Pagos", "example": "¿Cuáles son mis pagos más urgentes?"},
+                {"title": "Metas de Ahorro", "example": "¿Cómo van mis metas de ahorro?"},
+                {"title": "Cálculo de MSI", "example": "Compré una laptop de $15,000 a 12 meses sin intereses"}
+            ]},
+            user_message=message
+        )
+
+    def _handle_identity_intent(self) -> AgentActionResponse:
+        message = (
+            f"🤖 **¿Quién soy?**\n\n"
+            f"Soy el **Asistente de IA Financiera de GTOPagos**, construido bajo una arquitectura de **Agentes Autónomos**, "
+            f"**Spec-Driven Development (SDD)** y el protocolo estándar **Model Context Protocol (MCP)**.\n\n"
+            f"A diferencia de un chat tradicional, **yo no invento cálculos matemáticos**. Cuando me pides proyecciones de cuotas, "
+            f"flujo quincenal o semáforos de pago, ejecuto herramientas con precisión exacta de centavos.\n\n"
+            f"¿En qué te puedo asesorar hoy?"
+        )
+        return AgentActionResponse(
+            success=True,
+            thought="Presentación de capacidades técnicas y de producto.",
+            action_type="READ_ONLY",
+            data={"widget_type": "assistant_capabilities", "capabilities": [
+                {"title": "Cálculo de MSI", "example": "Compré una televisión de $8,000 a 6 meses"},
+                {"title": "Flujo Quincenal", "example": "Gano 25,000 al mes, corte 15"},
+                {"title": "Semáforo de Pagos", "example": "Semáforo de vencimientos"}
+            ]},
+            user_message=message
+        )
+
+    def _handle_user_summary_intent(self, user, query: str) -> AgentActionResponse:
+        """
+        Consulta la base de datos real de Django para el usuario autenticado.
+        """
+        if not user or not hasattr(user, "is_authenticated") or not user.is_authenticated:
+            return AgentActionResponse(
+                success=True,
+                thought="Usuario no autenticado para consultar balance.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message="Para mostrarte tu saldo y resumen de gastos exactos necesitas iniciar sesión en tu cuenta de GTOPagos. Si lo deseas, puedes pedirme calcular compras a meses o simular un flujo de caja."
+            )
+
+        try:
+            from finance.models import FinancialRecord
+            from django.db.models import Sum
+
+            today = date.today()
+            first_day = today.replace(day=1)
+
+            # Gastos del mes
+            expenses_sum = FinancialRecord.objects.filter(
+                user=user,
+                is_active=True,
+                record_type__behavior='EXPENSE',
+                record_date__gte=first_day,
+                record_date__lte=today
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+            # Ingresos del mes
+            incomes_sum = FinancialRecord.objects.filter(
+                user=user,
+                is_active=True,
+                record_type__behavior='INCOME',
+                record_date__gte=first_day,
+                record_date__lte=today
+            ).aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
+
+            balance = incomes_sum - expenses_sum
+
+            # Salario registrado en perfil
+            salary = Decimal('0.00')
+            if hasattr(user, 'profile') and user.profile.salary:
+                salary = user.profile.salary
+
+            user_message = (
+                f"### 📊 Resumen de tus Finanzas ({today.strftime('%B %Y').capitalize()})\n\n"
+                f"- 🟢 **Ingresos registrados este mes:** ${incomes_sum:,.2f} MXN\n"
+                f"- 🔴 **Gastos registrados este mes:** ${expenses_sum:,.2f} MXN\n"
+                f"- ⚖️ **Balance neto:** **${balance:,.2f} MXN**\n\n"
+            )
+
+            if salary > Decimal('0.00'):
+                user_message += f"- 💼 **Salario mensual base en perfil:** ${salary:,.2f} MXN\n\n"
+
+            if balance >= Decimal('0.00'):
+                user_message += "✨ Tienes un balance positivo este mes. Es un buen momento para destinar un porcentaje a tus metas de ahorro."
+            else:
+                user_message += "⚠️ Tus gastos superan tus ingresos este mes. Te sugiero revisar tus pagos pendientes o utilizar la regla 50/30/20 para equilibrar tu flujo."
+
+            return AgentActionResponse(
+                success=True,
+                thought=f"Consulta de balance real ejecutada: Ingresos ${incomes_sum}, Gastos ${expenses_sum}, Balance ${balance}.",
+                action_type="READ_ONLY",
+                data={
+                    "widget_type": "cashflow_gauge",
+                    "total_income": str(incomes_sum),
+                    "total_committed": str(expenses_sum),
+                    "available_margin": str(balance),
+                    "compromised_percentage": str(((expenses_sum / incomes_sum) * 100).quantize(Decimal('0.01'))) if incomes_sum > 0 else "0",
+                    "risk_level": "BAJO" if balance >= 0 else "ALTO",
+                    "cutoff_day": today.day
+                },
+                user_message=user_message
+            )
+        except Exception as e:
+            logger.error(f"Error consulting user balance: {e}")
+            return AgentActionResponse(
+                success=False,
+                thought=f"Error consultando balance: {str(e)}",
+                action_type="ALERT",
+                data={"widget_type": "info_banner"},
+                user_message="Ocurrió un inconveniente al consultar tu resumen financiero. Por favor intenta de nuevo en unos momentos."
+            )
+
+    def _handle_user_goals_intent(self, user) -> AgentActionResponse:
+        """
+        Consulta las metas de ahorro reales del usuario en Django.
+        """
+        if not user or not hasattr(user, "is_authenticated") or not user.is_authenticated:
+            return AgentActionResponse(
+                success=True,
+                thought="Usuario no autenticado para consultar metas.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message="Inicia sesión para poder consultar el progreso de tus metas de ahorro registradas."
+            )
+
+        try:
+            from finance.models import FinancialGoal
+            goals = FinancialGoal.objects.filter(user=user).order_by('-created_at')[:5]
+
+            if not goals.exists():
+                return AgentActionResponse(
+                    success=True,
+                    thought="El usuario no tiene metas de ahorro registradas.",
+                    action_type="READ_ONLY",
+                    data={"widget_type": "info_banner"},
+                    user_message="🎯 Aún no tienes metas de ahorro registradas. Puedes crear una nueva meta desde el módulo **Metas** en el menú lateral para empezar a monitorear tu progreso."
+                )
+
+            user_message = f"### 🎯 Tus Metas de Ahorro\n\n"
+            breakdown = []
+            for g in goals:
+                pct = int((g.saved_amount / g.target_amount) * 100) if g.target_amount > 0 else 0
+                user_message += (
+                    f"- **{g.name}:** ${g.saved_amount:,.2f} de ${g.target_amount:,.2f} MXN (**{pct}%**)\n"
+                )
+                breakdown.append({
+                    "pct": pct,
+                    "label": g.name,
+                    "desc": f"${g.saved_amount:,.2f} de ${g.target_amount:,.2f} MXN"
+                })
+
+            user_message += "\n💡 *Tip:* Para alcanzar tus metas más rápido, programa transferencias fijas en cuanto recibas tu quincena."
+
+            return AgentActionResponse(
+                success=True,
+                thought=f"Se consultaron {len(breakdown)} metas del usuario.",
+                action_type="READ_ONLY",
+                data={
+                    "widget_type": "financial_tips",
+                    "breakdown": breakdown
+                },
+                user_message=user_message
+            )
+        except Exception as e:
+            logger.error(f"Error consulting user goals: {e}")
+            return AgentActionResponse(
+                success=False,
+                thought=f"Error consultando metas: {str(e)}",
+                action_type="ALERT",
+                data={"widget_type": "info_banner"},
+                user_message="No fue posible consultar tus metas en este momento. Inténtalo de nuevo más tarde."
+            )
+
+    def _handle_due_date_priority_intent(self, user, query: str) -> AgentActionResponse:
+        today = date.today()
+        items = []
+
+        if user and hasattr(user, "is_authenticated") and user.is_authenticated:
+            try:
+                from finance.models import FinancialRecord
+                records = FinancialRecord.objects.filter(
+                    user=user,
+                    is_active=True,
+                    record_type__behavior='EXPENSE'
+                ).exclude(
+                    payment_status__status__iexact='PAGADO'
+                ).select_related('record_type', 'payment_status')[:15]
+
+                for rec in records:
+                    items.append(DueDateItem(
+                        id=rec.id,
+                        concept=rec.description or f"Gasto #{rec.id}",
+                        amount=rec.amount,
+                        due_date=rec.record_date,
+                        is_paid=False
+                    ))
+            except Exception as e:
+                logger.warning(f"Error fetching user records for due date priority: {e}")
+
+        # Si el usuario no está autenticado (modo demo/invitado), mostrar simulación interactiva
+        if not items and (not user or not getattr(user, 'is_authenticated', False)):
+            items = [
+                DueDateItem(id=1, concept="Tarjeta de Crédito (Corte)", amount=Decimal('3450.00'), due_date=today + timedelta(days=2)),
+                DueDateItem(id=2, concept="Servicio de Luz (CFE)", amount=Decimal('480.00'), due_date=today + timedelta(days=5)),
+                DueDateItem(id=3, concept="Servicio de Internet", amount=Decimal('649.00'), due_date=today + timedelta(days=11)),
+                DueDateItem(id=4, concept="Cuota Crédito Auto", amount=Decimal('4200.00'), due_date=today + timedelta(days=19)),
+            ]
+
+        # Si el usuario está autenticado y realmente no tiene deudas pendientes
+        if not items:
+            return AgentActionResponse(
+                success=True,
+                thought="El usuario no tiene pagos pendientes en su cuenta.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message="🎉 **¡Excelente noticia!** No tienes pagos ni deudas pendientes registradas en tu cuenta en este momento.\n\nCuando registres compromisos o compras a crédito en tu Dashboard con estado **Pendiente**, aquí aparecerán clasificados por urgencia de vencimiento."
+            )
+
+        mcp_res = self.mcp.call_tool("prioritize_due_dates", {
+            "reference_date": today.isoformat(),
+            "items": [item.model_dump(mode='json') for item in items]
+        })
+
+        if not mcp_res.success:
+            return mcp_res
+
+        data = mcp_res.data
+        data["widget_type"] = "priority_table"
+        crit = data.get("critical_count", 0)
+
+        alert_msg = "🚨 **Atención Inmediata:** Tienes pagos críticos que vencen en menos de 3 días." if crit > 0 else "✅ **Situación Estable:** No tienes pagos en riesgo inmediato."
+
+        user_message = (
+            f"### 🚦 Semáforo de Vencimientos y Prioridad de Pagos\n\n"
+            f"{alert_msg}\n\n"
+            f"- **Compromisos evaluados:** {len(data['prioritized_list'])}\n"
+            f"- **Monto total por cubrir:** ${Decimal(data['total_pending_amount']):,.2f} MXN\n"
+            f"- **Pagos Críticos / Vencidos:** {crit}\n\n"
+            f"*(Consulta la tabla abajo para ver el orden de prioridad recomendado)*"
+        )
+
+        return AgentActionResponse(
+            success=True,
+            thought=f"Priorización ejecutada con {len(items)} registros reales.",
+            action_type="READ_ONLY",
+            data=data,
+            user_message=user_message
+        )
 
     def _handle_msi_intent(self, params: Dict[str, Any]) -> AgentActionResponse:
         total_amount = params["total_amount"]
@@ -197,92 +516,64 @@ class FinancialAIOrchestrator:
             user_message=user_message
         )
 
-    def _handle_due_date_priority_intent(self, user, query: str) -> AgentActionResponse:
-        today = date.today()
-        items = []
-
-        # Intentar obtener los registros reales del usuario si está autenticado en Django
-        if user and hasattr(user, "is_authenticated") and user.is_authenticated:
-            try:
-                from finance.models import FinancialRecord
-                records = FinancialRecord.objects.filter(
-                    user=user,
-                    is_active=True,
-                    record_type__behavior='EXPENSE'
-                ).exclude(
-                    payment_status__status__iexact='PAGADO'
-                ).select_related('record_type', 'payment_status')[:15]
-
-                for rec in records:
-                    items.append(DueDateItem(
-                        id=rec.id,
-                        concept=rec.description or f"Gasto #{rec.id}",
-                        amount=rec.amount,
-                        due_date=rec.record_date,
-                        is_paid=False
-                    ))
-            except Exception as e:
-                logger.warning(f"Error fetching user records for due date priority: {e}")
-
-        # Si el usuario no tiene registros o es invitado, generar simulación interactiva
-        if not items:
-            items = [
-                DueDateItem(id=1, concept="Tarjeta de Crédito (Corte)", amount=Decimal('3450.00'), due_date=today + timedelta(days=2)),
-                DueDateItem(id=2, concept="Servicio de Luz (CFE)", amount=Decimal('480.00'), due_date=today + timedelta(days=5)),
-                DueDateItem(id=3, concept="Servicio de Internet", amount=Decimal('649.00'), due_date=today + timedelta(days=11)),
-                DueDateItem(id=4, concept="Cuota Crédito Auto", amount=Decimal('4200.00'), due_date=today + timedelta(days=19)),
-            ]
-
-        mcp_res = self.mcp.call_tool("prioritize_due_dates", {
-            "reference_date": today.isoformat(),
-            "items": [item.model_dump(mode='json') for item in items]
-        })
-
-        if not mcp_res.success:
-            return mcp_res
-
-        data = mcp_res.data
-        data["widget_type"] = "priority_table"
-        crit = data.get("critical_count", 0)
-
-        alert_msg = "🚨 **Atención Inmediata:** Tienes pagos críticos que vencen en menos de 3 días." if crit > 0 else "✅ **Situación Estable:** No tienes pagos en riesgo inmediato."
-
-        user_message = (
-            f"### 🚦 Semáforo de Vencimientos y Prioridad de Pagos\n\n"
-            f"{alert_msg}\n\n"
-            f"- **Compromisos evaluados:** {len(data['prioritized_list'])}\n"
-            f"- **Monto total por cubrir:** ${Decimal(data['total_pending_amount']):,.2f} MXN\n"
-            f"- **Pagos Críticos / Vencidos:** {crit}\n\n"
-            f"*(Consulta la tabla interactiva abajo para ver el desglose ordenado por urgencia)*"
-        )
-
-        return AgentActionResponse(
-            success=True,
-            thought=f"Priorización de vencimientos ejecutada con {len(items)} items ({crit} críticos).",
-            action_type="READ_ONLY",
-            data=data,
-            user_message=user_message
-        )
-
     def _handle_cashflow_intent(self, text: str, user) -> AgentActionResponse:
-        # Extraer salario si está presente en el texto ("gano 20000", "salario de 15,000")
         salary_match = re.search(r'(?:gano|salario|ingreso|sueldo|de)\s*(?:\$)?\s*(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+)', text, re.IGNORECASE)
         if salary_match:
             try:
                 salary = Decimal(salary_match.group(1).replace(',', ''))
             except InvalidOperation:
                 salary = Decimal('20000.00')
+        elif user and hasattr(user, 'profile') and user.profile.salary:
+            salary = user.profile.salary
         else:
             salary = Decimal('20000.00')
 
-        # Detectar corte 15 o 30
         cutoff = 30 if any(k in text for k in ["30", "segunda quincena", "fin de mes"]) else 15
 
-        # Generar u obtener compromisos
-        obligations = [
-            PendingObligation(description="Renta departamental", amount=Decimal('5500.00'), due_date=date.today()),
-            PendingObligation(description="Servicios y despensa", amount=Decimal('2300.00'), due_date=date.today()),
-        ]
+        # Obtener compromisos reales del usuario si existen
+        obligations = []
+        if user and hasattr(user, 'is_authenticated') and user.is_authenticated:
+            try:
+                from finance.models import FinancialRecord
+                recs = FinancialRecord.objects.filter(
+                    user=user,
+                    is_active=True,
+                    record_type__behavior='EXPENSE'
+                ).exclude(payment_status__status__iexact='PAGADO')[:10]
+                for r in recs:
+                    obligations.append(PendingObligation(
+                        description=r.description or f"Gasto #{r.id}",
+                        amount=r.amount,
+                        due_date=r.record_date
+                    ))
+            except Exception:
+                pass
+
+        if not obligations:
+            # Si no hay compromisos registrados, calcular el margen quincenal neto
+            fortnight_income = (salary / Decimal('2.00'))
+            user_message = (
+                f"### 📊 Proyección de Flujo de Caja (Corte {cutoff})\n\n"
+                f"- **Ingreso Quincenal Estimado:** ${fortnight_income:,.2f} MXN (basado en un salario de ${salary:,.2f})\n"
+                f"- **Compromisos pendientes registrados:** $0.00 MXN\n"
+                f"- **Margen Libre:** **${fortnight_income:,.2f} MXN**\n\n"
+                f"✨ Tu flujo está 100% libre en esta quincena. ¡Excelente momento para abonar a tus ahorros!"
+            )
+            return AgentActionResponse(
+                success=True,
+                thought="Flujo de caja calculado sin deudas pendientes registradas.",
+                action_type="CALCULATION",
+                data={
+                    "widget_type": "cashflow_gauge",
+                    "cutoff_day": cutoff,
+                    "total_income": str(fortnight_income),
+                    "total_committed": "0.00",
+                    "available_margin": str(fortnight_income),
+                    "compromised_percentage": "0.00",
+                    "risk_level": "BAJO"
+                },
+                user_message=user_message
+            )
 
         mcp_res = self.mcp.call_tool("forecast_cashflow", {
             "salary": float(salary),
@@ -303,7 +594,7 @@ class FinancialAIOrchestrator:
             f"- **Margen Libre:** **${Decimal(data['available_margin']):,.2f} MXN**\n"
             f"- **Porcentaje Comprometido:** {data['compromised_percentage']}%\n"
             f"- **Nivel de Riesgo:** **{data['risk_level']}**\n\n"
-            f"{data.get('risk_alert') or '✨ Tienes un flujo saludable para cubrir tus gastos e impulsar tu ahorro.'}"
+            f"{data.get('risk_alert') or '✨ Tienes un flujo saludable para cubrir tus compromisos e impulsar tu ahorro.'}"
         )
 
         return AgentActionResponse(
@@ -324,15 +615,14 @@ class FinancialAIOrchestrator:
 
         data = mcp_res.data
         data["widget_type"] = "category_badge"
-
         confidence_pct = int(Decimal(str(data['confidence'])) * Decimal('100'))
 
         user_message = (
             f"### 🏷️ Categorización Inteligente\n\n"
-            f"El concepto **\"{data['original_text']}\"** ha sido clasificado como:\n\n"
+            f"El concepto **\"{data['original_text']}\"** corresponde a:\n\n"
             f"📂 **{data['suggested_category']}** *(Tipo: {data['behavior']})*\n"
             f"🎯 Confianza: **{confidence_pct}%**\n\n"
-            f"Puedes usar esta categoría al registrar tu movimiento en el Dashboard."
+            f"Puedes seleccionar esta categoría directamente al crear tu movimiento en el Dashboard."
         )
 
         return AgentActionResponse(
@@ -343,62 +633,170 @@ class FinancialAIOrchestrator:
             user_message=user_message
         )
 
-    def _handle_financial_advice_intent(self, text: str) -> AgentActionResponse:
-        data = {
-            "widget_type": "financial_tips",
-            "methodology": "Regla 50/30/20",
-            "breakdown": [
-                {"pct": 50, "label": "Necesidades Básicas", "desc": "Renta, alimentos, servicios, transporte"},
-                {"pct": 30, "label": "Deseos y Calidad de Vida", "desc": "Salidas, entretenimiento, compras no esenciales"},
-                {"pct": 20, "label": "Ahorro e Inversión", "desc": "Fondo de emergencia, amortización de deudas, retiro"}
-            ]
-        }
+    def _match_financial_advice(self, text: str) -> Optional[AgentActionResponse]:
+        """
+        Respuestas educativas y detalladas para conceptos financieros comunes.
+        """
+        # Regla 50/30/20
+        if any(k in text for k in ["50/30/20", "50-30-20", "regla 50", "como distribuir mi sueldo"]):
+            return AgentActionResponse(
+                success=True,
+                thought="Explicación de la regla 50/30/20.",
+                action_type="READ_ONLY",
+                data={
+                    "widget_type": "financial_tips",
+                    "breakdown": [
+                        {"pct": 50, "label": "Necesidades Básicas", "desc": "Renta/hipoteca, despensa, luz, agua, transporte indispensable."},
+                        {"pct": 30, "label": "Deseos y Calidad de Vida", "desc": "Salidas a comer, suscripciones streaming, viajes y compras personales."},
+                        {"pct": 20, "label": "Ahorro e Inversión", "desc": "Fondo de emergencia, aportaciones a retiro o liquidación acelerada de deudas."}
+                    ]
+                },
+                user_message=(
+                    f"### 💡 La Regla 50/30/20: Tu Guía de Presupuesto\n\n"
+                    f"Es un método simple y efectivo para distribuir tus ingresos mensuales:\n\n"
+                    f"1. **50% en Necesidades Básicas:** Lo que requieres sí o sí para vivir.\n"
+                    f"2. **30% en Deseos:** Actividades recreativas y compras de confort.\n"
+                    f"3. **20% en Ahorro y Deudas:** La base para tu libertad financiera futura.\n\n"
+                    f"📌 *Recomendación:* Si tus deudas superan el 20%, ajusta temporalmente el rubro de 'Deseos' al 15% para liquidar pasivos más rápido."
+                )
+            )
 
-        user_message = (
-            f"### 💡 Estrategia Financiera Inteligente: Regla 50/30/20\n\n"
-            f"Para mantener unas finanzas sanas y evitar sobreendeudarte:\n\n"
-            f"1. **50% Necesidades:** Tu vivienda, servicios y comida indispensable.\n"
-            f"2. **30% Estilo de Vida:** Entretenimiento, restaurantes y compras personales.\n"
-            f"3. **20% Futuro y Deudas:** Ahorro automático y liquidación de créditos costosos.\n\n"
-            f"📌 *Tip GTOPagos:* Automatiza transferencias a tu meta de ahorro el mismo día que recibes tu nómina."
+        # Fondo de emergencia
+        if any(k in text for k in ["fondo de emergencia", "fondo de reserva", "ahorro de emergencia"]):
+            return AgentActionResponse(
+                success=True,
+                thought="Explicación sobre fondo de emergencia.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message=(
+                    f"### 🛡️ ¿Qué es un Fondo de Emergencia y cuánto necesitas?\n\n"
+                    f"Un **Fondo de Emergencia** es una reserva de dinero líquido destinada únicamente a cubrir imprevistos graves (desempleo, gastos médicos, reparaciones urgentes).\n\n"
+                    f"- **Monto ideal:** Entre **3 y 6 meses de tus gastos fijos indispensables**.\n"
+                    f"- **¿Dónde guardarlo?** En instrumentos de alta liquidez y bajo riesgo (ej: Cetesdirecto o cuentas con rendimiento diario a la vista).\n"
+                    f"- **Regla de oro:** No lo inviertas en renta variable ni lo tengas en tu tarjeta de uso diario para evitar la tentación de gastarlo."
+                )
+            )
+
+        # Estrategia de pago de deudas (Avalancha vs Bola de Nieve)
+        if any(k in text for k in ["salir de deudas", "pagar deudas", "bola de nieve", "metodo avalancha", "método avalancha"]):
+            return AgentActionResponse(
+                success=True,
+                thought="Explicación de métodos de amortización de deudas.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message=(
+                    f"### 🚀 Las 2 Mejores Estrategias para Salir de Deudas\n\n"
+                    f"1. **Método Bola de Nieve (Psicológico):**\n"
+                    f"   - Pagas el mínimo en todas tus deudas y abonas todo el extra a la deuda con el **menor saldo total**.\n"
+                    f"   - Al liquidarla rápido, obtienes victorias inmediatas que te motivan a continuar.\n\n"
+                    f"2. **Método Avalancha (Matemático - El más eficiente):**\n"
+                    f"   - Pagas el mínimo en todas tus deudas y abonas todo el extra a la deuda con la **tasa de interés (CAT) más alta**.\n"
+                    f"   - Te ahorra la mayor cantidad de dinero en intereses a largo plazo."
+                )
+            )
+
+        # Gastos hormiga
+        if any(k in text for k in ["gastos hormiga", "gasto hormiga", "fuga de dinero"]):
+            return AgentActionResponse(
+                success=True,
+                thought="Consejos sobre gastos hormiga.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message=(
+                    f"### 🐜 ¿Cómo detener los Gastos Hormiga?\n\n"
+                    f"Los gastos hormiga son pequeñas compras diarias que parecen insignificantes (un café de $65, propinas, snacks, comisiones de apps) pero que pueden sumar **$1,500 a $3,500 MXN mensuales**.\n\n"
+                    f"- ☕ **Prepara en casa:** Café matutino y snacks para el trabajo.\n"
+                    f"- 📱 **Audita tus suscripciones:** Cancela plataformas que no hayas usado en los últimos 30 días.\n"
+                    f"- ⏱️ **Regla de las 48 horas:** Si ves algo no esencial que quieres comprar, espera 48 horas antes de pagar. En la mayoría de casos el impulso desaparece."
+                )
+            )
+
+        return None
+
+    def _ask_gemini_llm(self, query: str, user, api_key: str) -> Optional[AgentActionResponse]:
+        """
+        Llama al modelo Gemini 1.5 Flash (Free Tier) de Google para responder de forma conversacional y profunda.
+        """
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+            user_ctx = ""
+            if user and hasattr(user, 'email'):
+                user_ctx = f"Usuario actual: {user.email}. "
+
+            system_instruction = (
+                "Eres el Asistente Financiero Inteligente de GTOPagos. Responde siempre en español de forma cortés, "
+                "estructurada, profesional y empática. Usa formato Markdown con emojis apropiados. No inventes cálculos "
+                "matemáticos de préstamos; si te piden calcular cuotas, diles que utilicen el formato 'Compré X a Y meses'."
+            )
+
+            payload = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": f"Contexto: {system_instruction} {user_ctx}\nConsulta del usuario: {query}"}]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "maxOutputTokens": 800,
+                }
+            }
+
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(req, timeout=8) as response:
+                res_data = json.loads(response.read().decode('utf-8'))
+                candidates = res_data.get('candidates', [])
+                if candidates:
+                    text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                    if text:
+                        return AgentActionResponse(
+                            success=True,
+                            thought="Respuesta generada mediante Gemini 1.5 Flash.",
+                            action_type="READ_ONLY",
+                            data={"widget_type": "info_banner"},
+                            user_message=text
+                        )
+        except Exception as e:
+            logger.warning(f"Error calling Gemini LLM: {e}")
+        return None
+
+    def _handle_smart_conversational_fallback(self, query: str, user) -> AgentActionResponse:
+        """
+        Respuesta conversacional natural y útil cuando la consulta es libre y no encaja en una skill puntual.
+        """
+        user_name = ""
+        if user and hasattr(user, "get_short_name") and user.get_short_name():
+            user_name = f", {user.get_short_name()}"
+
+        message = (
+            f"Te escucho con atención{user_name}. Entiendo que tu consulta está relacionada con: *\"{query}\"*.\n\n"
+            f"Para darte la respuesta más exacta posible, ¿qué te gustaría hacer?\n\n"
+            f"- 📊 **Ver tu balance y gastos del mes:** Escribe *\"¿Cuánto he gastado?\"*\n"
+            f"- 🚦 **Revisar tus deudas y vencimientos:** Escribe *\"Semáforo de pagos\"*\n"
+            f"- 💳 **Calcular una compra a meses sin intereses:** Escribe *\"Compré $X a Y meses\"*\n"
+            f"- 🏷️ **Categorizar un gasto de tu estado de cuenta:** Escribe *\"Categoriza [concepto]\"*\n"
+            f"- 🎯 **Revisar tus metas de ahorro:** Escribe *\"¿Cómo van mis metas?\"*\n"
+            f"- 💡 **Aprender a organizar tu dinero:** Escribe *\"Regla 50/30/20\"* o *\"Fondo de emergencia\"*"
         )
 
         return AgentActionResponse(
             success=True,
-            thought="Se proporcionó guía financiera estructurada 50/30/20.",
+            thought="Respuesta conversacional empática y guía de acción específica.",
             action_type="READ_ONLY",
-            data=data,
-            user_message=user_message
-        )
-
-    def _handle_general_fallback(self, query: str) -> AgentActionResponse:
-        data = {
-            "widget_type": "assistant_capabilities",
-            "capabilities": [
-                {"title": "Cálculo de MSI", "example": "\"Compré una laptop de $12,000 a 12 meses sin intereses\""},
-                {"title": "Semáforo de Vencimientos", "example": "\"¿Cuáles son mis pagos más urgentes?\""},
-                {"title": "Flujo de Caja Quincenal", "example": "\"Gano 18,000 al mes, ¿cómo viene mi corte 15?\""},
-                {"title": "Categorización Inteligente", "example": "\"Categoriza: OXXO GAS COMBUSTIBLE 500\""},
-                {"title": "Salud Financiera", "example": "\"¿Cómo funciona la regla 50/30/20?\""},
-            ]
-        }
-
-        user_message = (
-            f"👋 ¡Hola! Soy tu **Asistente Financiero GTOPagos**.\n\n"
-            f"Puedo ayudarte a gestionar tus números con total precisión matemática y cero riesgos. Prueba pedirme:\n\n"
-            f"- 💳 *\"Compré una televisión de $9,000 a 6 meses sin intereses\"*\n"
-            f"- 🚦 *\"Semáforo de vencimientos\"* para ver tus adeudos urgentes\n"
-            f"- 📊 *\"Gano 16,000 y tengo corte el 15, ¿cómo ando de liquidez?\"*\n"
-            f"- 🏷️ *\"Categoriza: Pago NETFLIX mensual\"*\n"
-            f"- 💡 *\"Dame consejos de ahorro con la regla 50/30/20\"*"
-        )
-
-        return AgentActionResponse(
-            success=True,
-            thought="Se devolvió menú de capacidades del agente.",
-            action_type="READ_ONLY",
-            data=data,
-            user_message=user_message
+            data={
+                "widget_type": "assistant_capabilities",
+                "capabilities": [
+                    {"title": "Balance y Gastos", "example": "¿Cuánto he gastado este mes?"},
+                    {"title": "Semáforo de Pagos", "example": "Semáforo de vencimientos"},
+                    {"title": "Cálculo de MSI", "example": "Compré una laptop de $12,000 a 12 meses"},
+                    {"title": "Estrategia 50/30/20", "example": "Explícame la regla 50/30/20"}
+                ]
+            },
+            user_message=message
         )
 
 

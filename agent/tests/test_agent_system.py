@@ -223,6 +223,28 @@ class TestFinancialAIOrchestrator(unittest.TestCase):
         res = self.orchestrator.process_query("   ")
         self.assertFalse(res.success)
 
+    def test_greeting_query(self):
+        res = self.orchestrator.process_query("Hola, buenas tardes")
+        self.assertTrue(res.success)
+        self.assertIn("Hola", res.user_message)
+        self.assertEqual(res.thought, "Saludo cálido y bienvenida contextual.")
+
+    def test_identity_query(self):
+        res = self.orchestrator.process_query("¿Quién eres y para qué sirves?")
+        self.assertTrue(res.success)
+        self.assertIn("Asistente de IA Financiera", res.user_message)
+
+    def test_emergency_fund_query(self):
+        res = self.orchestrator.process_query("¿Qué es un fondo de emergencia?")
+        self.assertTrue(res.success)
+        self.assertIn("Fondo de Emergencia", res.user_message)
+        self.assertIn("3 y 6 meses", res.user_message)
+
+    def test_conversational_fallback_mentions_query(self):
+        res = self.orchestrator.process_query("Quiero planear unas vacaciones el próximo año")
+        self.assertTrue(res.success)
+        self.assertIn("Quiero planear unas vacaciones", res.user_message)
+
 
 if __name__ == "__main__":
     unittest.main()
