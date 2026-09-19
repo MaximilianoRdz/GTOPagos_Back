@@ -83,6 +83,13 @@ class GTOPagosMCPServer:
             handler=self._handle_system_audit
         )
 
+        # 7. Herramienta de creación de registro financiero
+        self.register_tool(
+            name="create_record",
+            description="Crea un nuevo registro de ingreso, gasto o transferencia en el dashboard del usuario.",
+            handler=self._handle_create_record
+        )
+
     def _register_default_resources(self):
         self.register_resource(
             uri="finance://standards/rules",
@@ -245,6 +252,100 @@ class GTOPagosMCPServer:
             data=data,
             user_message=result.summary_text
         )
+
+    def _handle_create_record(self, args: Dict[str, Any]) -> AgentActionResponse:
+        validated_input = CreateRecordToolInput(**args)
+        
+        try:
+            from finance.models import FinancialRecord, FinancialRecordType, Category
+            from dashboard.models import UserFinanceDashboard
+            from payments.models import PaymentStatus, PaymentMethod
+
+            dashboard = UserFinanceDashboard.objects.filter(id=validated_input.dashboard_id).first()
+            if not dashboard:
+                return AgentActionResponse(
+                    success=False,
+                    thought="Dashboard no encontrado para crear registro.",
+                    action_type="ALERT",
+                    data={"error": "DASHBOARD_NOT_FOUND"},
+                    user_message="No se encontró el espacio de trabajo o dashboard especificado."
+                )
+
+            user = dashboard.user
+
+            # Resolver record_type
+            record_type = FinancialRecordType.objects.filter(behavior=validated_input.record_type).first()
+            if not record_type:
+                record_type = FinancialRecordType.objects.first()
+
+            # Resolver categoría
+            category = None
+            if validated_input.category_id:
+                category = Category.objects.filter(id=validated_input.category_id).first()
+            elif validated_input.category_name:
+                category = Category.objects.filter(name__iexact=validated_input.category_name, record_type=record_type).first()
+                if not category:
+                    category = Category.objects.filter(name__icontains=validated_input.category_name, record_type=record_type).first()
+            
+            if not category and record_type:
+                category = Category.objects.filter(record_type=record_type).first()
+
+            # Resolver payment_status
+            status_code = validated_input.payment_status_code or "PAID"
+            payment_status = PaymentStatus.objects.filter(code__iexact=status_code).first()
+            if not payment_status:
+                payment_status = PaymentStatus.objects.filter(status__icontains="pagado").first() or PaymentStatus.objects.first()
+
+            # Resolver payment_method
+            payment_method = None
+            if validated_input.payment_method_id:
+                payment_method = PaymentMethod.objects.filter(id=validated_input.payment_method_id).first()
+            else:
+                payment_method = PaymentMethod.objects.first()
+
+            rec = FinancialRecord.objects.create(
+                user=user,
+                dashboard=dashboard,
+                record_type=record_type,
+                category=category,
+                payment_method=payment_method,
+                payment_status=payment_status,
+                amount=validated_input.amount,
+                description=validated_input.description,
+                record_date=validated_input.record_date,
+                is_recurrent=validated_input.is_recurrent,
+                total_installments=validated_input.total_installments,
+                current_installment=validated_input.current_installment,
+                is_active=True
+            )
+
+            tipo_str = "Ingreso" if validated_input.record_type == "INCOME" else "Gasto"
+            cat_str = f" en categoría **{category.name}**" if category else ""
+
+            return AgentActionResponse(
+                success=True,
+                thought=f"Registro #{rec.id} creado exitosamente en dashboard '{dashboard.name}'.",
+                action_type="MUTATION",
+                data={
+                    "record_id": rec.id,
+                    "amount": str(rec.amount),
+                    "behavior": validated_input.record_type,
+                    "description": rec.description,
+                    "category_name": category.name if category else "General",
+                    "dashboard_id": dashboard.id,
+                    "dashboard_name": dashboard.name,
+                    "record_date": str(rec.record_date)
+                },
+                user_message=f"✅ **{tipo_str} registrado con éxito:** ${rec.amount:,.2f} MXN por *\"{rec.description}\"*{cat_str} en tu espacio **{dashboard.name}**."
+            )
+        except Exception as e:
+            return AgentActionResponse(
+                success=False,
+                thought=f"Error creando registro: {str(e)}",
+                action_type="ALERT",
+                data={"error": str(e)},
+                user_message=f"Ocurrió un error al registrar el movimiento: {str(e)}"
+            )
 
     # --- Dispatcher JSON-RPC 2.0 ---
     def handle_json_rpc(self, request_str: str) -> str:

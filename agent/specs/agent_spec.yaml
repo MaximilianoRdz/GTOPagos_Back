@@ -47,6 +47,14 @@ guardrails:
     rule: "Si los gastos pendientes superan el 80% del salario o presupuesto mensual disponible, el agente DEBE emitir una advertencia de riesgo de sobreendeudamiento."
     severity: "MEDIUM"
 
+  - id: "HUMAN_IN_THE_LOOP_MUTATION"
+    rule: "Toda instrucción de mutación (crear gastos/ingresos) debe generar primero un borrador interactivo para confirmación explícita del usuario antes de persistir en base de datos."
+    severity: "CRITICAL"
+
+  - id: "CLOSED_DOMAIN_SCOPE"
+    rule: "El agente solo responde sobre finanzas personales, contabilidad y la plataforma GTOPagos. Debe declinar cortésmente cualquier tema no relacionado."
+    severity: "HIGH"
+
 # ------------------------------------------------------------------------------
 # 3. CONTRATO DE SALIDA JSON (Output Format)
 # ------------------------------------------------------------------------------
@@ -63,7 +71,7 @@ output_contract:
       description: "Cadena de razonamiento interno del agente (Reasoning Step)"
     action_type:
       type: "string"
-      enum: ["READ_ONLY", "MUTATION", "CALCULATION", "ALERT"]
+      enum: ["READ_ONLY", "MUTATION", "MUTATION_PROPOSAL", "CALCULATION", "ALERT"]
     data:
       type: "object"
       description: "Estructura de datos tipada con los resultados para renderizado de Generative UI"

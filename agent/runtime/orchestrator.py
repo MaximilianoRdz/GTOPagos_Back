@@ -68,7 +68,12 @@ class FinancialAIOrchestrator:
         if self._is_identity_or_help_query(query_lower):
             return self._handle_identity_intent()
 
-        # 3. Auditoría Integral 360° del Sistema (Ingresos, Gastos, Fugas, Deudas y Metas)
+        # 3. Propuesta de Creación de Movimiento / Registro (Human-in-the-Loop)
+        mutation_proposal = self._match_record_creation_intent(query, user)
+        if mutation_proposal:
+            return mutation_proposal
+
+        # 4. Auditoría Integral 360° del Sistema (Ingresos, Gastos, Fugas, Deudas y Metas)
         if self._is_system_audit_query(query_lower):
             return self._handle_system_audit_intent(user)
 
@@ -221,6 +226,91 @@ class FinancialAIOrchestrator:
             m = re.search(pat, text, re.IGNORECASE)
             if m:
                 return m.group(1).strip()
+        return None
+
+    def _match_record_creation_intent(self, text: str, user) -> Optional[AgentActionResponse]:
+        """
+        Detecta instrucciones en lenguaje natural para registrar ingresos o gastos
+        y genera una propuesta de mutación con confirmación interactiva (Human-in-the-Loop).
+        """
+        text_clean = text.strip()
+
+        patterns = [
+            r'(?:registra|registrar|anota|anotar|agrega|agregar|crea|crear|guarda|guardar)\s+(?:un\s+)?(?:nuevo\s+)?(gasto|ingreso|pago)\s+(?:de\s+)?(?:\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:pesos|mxn)?\s*(?:en|de|para|por)\s*(.+)',
+            r'(gast[eé]|pagu[eé])\s+(?:\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:pesos|mxn)?\s*(?:en|de|para|por)\s*(.+)',
+            r'(ingres[eé]|recib[ií])\s+(?:\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:pesos|mxn)?\s*(?:en|de|para|por)\s*(.+)',
+            r'(?:nuevo\s+)?(gasto|ingreso|pago)\s+(?:de\s+)?(?:\$)?(\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)\s*(?:pesos|mxn)?\s*(?:en|de|para|por)\s*(.+)'
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, text_clean, re.IGNORECASE)
+            if m:
+                tipo_raw = m.group(1).lower()
+                amount_raw = m.group(2).replace(',', '')
+                concept = m.group(3).strip()
+
+                try:
+                    amount = Decimal(amount_raw)
+                    if amount <= Decimal('0.00'):
+                        continue
+                except (InvalidOperation, ValueError):
+                    continue
+
+                if tipo_raw in ["ingreso", "ingresé", "recibí"]:
+                    behavior = "INCOME"
+                    tipo_label = "Ingreso"
+                else:
+                    behavior = "EXPENSE"
+                    tipo_label = "Gasto"
+
+                # Inferir categoría semántica mediante skill de categorización
+                cat_res = self.mcp.call_tool("categorize_expense", {"description": concept})
+                suggested_cat = "Otros"
+                if cat_res.success and isinstance(cat_res.data, dict):
+                    suggested_cat = cat_res.data.get("suggested_category", "Otros")
+
+                # Resolver Dashboard activo del usuario
+                dashboard_id = 1
+                dashboard_name = "Principal"
+                if user and hasattr(user, 'is_authenticated') and user.is_authenticated:
+                    try:
+                        from dashboard.models import UserFinanceDashboard
+                        user_dash = UserFinanceDashboard.objects.filter(user=user, is_active=True).first()
+                        if user_dash:
+                            dashboard_id = user_dash.id
+                            dashboard_name = user_dash.name
+                    except Exception:
+                        pass
+
+                return AgentActionResponse(
+                    success=True,
+                    thought=f"Propuesta de mutación generada para confirmación humana: {behavior} de ${amount} en '{concept}'.",
+                    action_type="MUTATION_PROPOSAL",
+                    data={
+                        "widget_type": "action_confirmation",
+                        "action": "CREATE_RECORD",
+                        "behavior": behavior,
+                        "record_type": behavior,
+                        "amount": str(amount),
+                        "description": concept,
+                        "category_name": suggested_cat,
+                        "dashboard_id": dashboard_id,
+                        "dashboard_name": dashboard_name,
+                        "record_date": str(date.today()),
+                        "status": "PENDING_CONFIRMATION"
+                    },
+                    user_message=(
+                        f"He preparado el borrador de este nuevo movimiento para ti:\n\n"
+                        f"- 📝 **Tipo:** {tipo_label}\n"
+                        f"- 💵 **Monto:** **${amount:,.2f} MXN**\n"
+                        f"- 🏷️ **Categoría sugerida:** {suggested_cat}\n"
+                        f"- 📌 **Concepto:** *\"{concept}\"*\n"
+                        f"- 📂 **Espacio:** {dashboard_name}\n"
+                        f"- 📅 **Fecha:** {date.today().strftime('%d/%m/%Y')}\n\n"
+                        f"Por tu seguridad, **este movimiento aún no se ha guardado en tu base de datos**. Por favor verifica los datos y pulsa **Confirmar y Guardar** en la tarjeta inferior para registrarlo en tu cuenta."
+                    )
+                )
+
         return None
 
     # --------------------------------------------------------------------------
@@ -858,9 +948,13 @@ class FinancialAIOrchestrator:
                 user_ctx = f"Usuario actual: {user.email}. "
 
             system_instruction = (
-                "Eres el Asistente Financiero Inteligente de GTOPagos. Responde siempre en español de forma cortés, "
-                "estructurada, profesional y empática. Usa formato Markdown con emojis apropiados. No inventes cálculos "
-                "matemáticos de préstamos; si te piden calcular cuotas, diles que utilicen el formato 'Compré X a Y meses'."
+                "Eres el Asistente Financiero Inteligente y Exclusivo de la plataforma GTOPagos. "
+                "Tu conocimiento está ESTRICTAMENTE LIMITADO a finanzas personales, presupuestos, contabilidad, "
+                "deudas, ahorro, inversiones y la operación del sistema GTOPagos. "
+                "Si el usuario pregunta sobre temas ajenos a finanzas (deportes, chismes, política, cultura pop o tareas escolares), "
+                "declina cortésmente diciendo: 'Como asistente financiero de GTOPagos, solo estoy capacitado para responder dudas sobre finanzas y la plataforma GTOPagos.' "
+                "Responde siempre en español de forma cortés, estructurada y profesional con Markdown y emojis. "
+                "No inventes cálculos matemáticos de préstamos; si te piden calcular cuotas, diles que utilicen el formato 'Compré X a Y meses'."
             )
 
             payload = {
@@ -900,34 +994,36 @@ class FinancialAIOrchestrator:
 
     def _handle_smart_conversational_fallback(self, query: str, user) -> AgentActionResponse:
         """
-        Respuesta conversacional natural y útil cuando la consulta es libre y no encaja en una skill puntual.
+        Guardrail de Dominio Cerrado: Asegura que el agente solo hable de temas financieros
+        y de la plataforma GTOPagos, guiando al usuario a las funciones del sistema.
         """
         user_name = ""
         if user and hasattr(user, "get_short_name") and user.get_short_name():
             user_name = f", {user.get_short_name()}"
 
         message = (
-            f"Te escucho con atención{user_name}. Entiendo que tu consulta está relacionada con: *\"{query}\"*.\n\n"
-            f"Para darte la respuesta más exacta posible, ¿qué te gustaría hacer?\n\n"
-            f"- 📊 **Ver tu balance y gastos del mes:** Escribe *\"¿Cuánto he gastado?\"*\n"
-            f"- 🚦 **Revisar tus deudas y vencimientos:** Escribe *\"Semáforo de pagos\"*\n"
-            f"- 💳 **Calcular una compra a meses sin intereses:** Escribe *\"Compré $X a Y meses\"*\n"
-            f"- 🏷️ **Categorizar un gasto de tu estado de cuenta:** Escribe *\"Categoriza [concepto]\"*\n"
-            f"- 🎯 **Revisar tus metas de ahorro:** Escribe *\"¿Cómo van mis metas?\"*\n"
-            f"- 💡 **Aprender a organizar tu dinero:** Escribe *\"Regla 50/30/20\"* o *\"Fondo de emergencia\"*"
+            f"Hola{user_name}. Como **Asistente Financiero Especializado de GTOPagos**, mi alcance está enfocado exclusivamente en la gestión de tu dinero, presupuestos y herramientas de la plataforma.\n\n"
+            f"No puedo responder dudas sobre temas ajenos a finanzas, pero con gusto puedo ayudarte en:\n\n"
+            f"- ➕ **Registrar Movimientos:** *\"Registra un gasto de $450 en Uber\"* o *\"Añade un ingreso de $15,000 de nómina\"*\n"
+            f"- 📊 **Tus Cuentas:** *\"¿Cuánto he gastado este mes?\"* o *\"Mi balance actual\"*\n"
+            f"- 🚦 **Deudas y Pagos:** *\"Semáforo de vencimientos\"* o *\"Pagos pendientes\"*\n"
+            f"- 💳 **Meses Sin Intereses:** *\"Compré una laptop de $12,000 a 12 meses\"*\n"
+            f"- 🎯 **Metas de Ahorro:** *\"¿Cómo van mis metas?\"*\n"
+            f"- 🧠 **Diagnóstico 360°:** *\"Analiza todo el sistema con mis gastos e ingresos y metas\"*\n\n"
+            f"¿Qué movimiento o consulta financiera deseas realizar?"
         )
 
         return AgentActionResponse(
             success=True,
-            thought="Respuesta conversacional empática y guía de acción específica.",
+            thought="Guardrail de dominio cerrado aplicado. Redirección a capacidades financieras de GTOPagos.",
             action_type="READ_ONLY",
             data={
                 "widget_type": "assistant_capabilities",
                 "capabilities": [
-                    {"title": "Balance y Gastos", "example": "¿Cuánto he gastado este mes?"},
+                    {"title": "Registrar Gasto", "example": "Registra un gasto de $350 en Oxxo"},
+                    {"title": "Auditoría 360°", "example": "Analiza todo el sistema con mis gastos e ingresos y metas"},
                     {"title": "Semáforo de Pagos", "example": "Semáforo de vencimientos"},
-                    {"title": "Cálculo de MSI", "example": "Compré una laptop de $12,000 a 12 meses"},
-                    {"title": "Estrategia 50/30/20", "example": "Explícame la regla 50/30/20"}
+                    {"title": "Cálculo de MSI", "example": "Compré una laptop de $12,000 a 12 meses"}
                 ]
             },
             user_message=message

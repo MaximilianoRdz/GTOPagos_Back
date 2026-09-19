@@ -2,7 +2,7 @@
 GTOPagos Agent Schemas (Pydantic v2)
 Contratos tipados para validación estricta de entradas y salidas en SDD y MCP.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import List, Optional, Literal
 from decimal import Decimal
 from datetime import date
@@ -124,12 +124,14 @@ class CategorizerOutput(BaseModel):
 # 5. SCHEMAS: MCP TOOLS MUTATION & INTEGRATION
 # ==============================================================================
 class CreateRecordToolInput(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     dashboard_id: int
     record_type: Literal["INCOME", "EXPENSE", "TRANSFER"]
     amount: Decimal = Field(gt=0, description="Monto estrictamente positivo con 2 decimales")
     description: str = Field(min_length=2)
     record_date: date = Field(default_factory=date.today)
     category_id: Optional[int] = None
+    category_name: Optional[str] = None
     payment_method_id: Optional[int] = None
     payment_status_code: Optional[str] = "PENDING"
     is_recurrent: bool = False
@@ -217,7 +219,7 @@ class SystemAuditOutput(BaseModel):
 class AgentActionResponse(BaseModel):
     success: bool
     thought: str
-    action_type: Literal["READ_ONLY", "MUTATION", "CALCULATION", "ALERT"]
+    action_type: Literal["READ_ONLY", "MUTATION", "MUTATION_PROPOSAL", "CALCULATION", "ALERT"]
     data: dict
     user_message: str
 

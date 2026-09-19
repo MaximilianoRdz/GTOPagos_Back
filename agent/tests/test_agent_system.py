@@ -184,6 +184,7 @@ class TestMCPServer(unittest.TestCase):
         self.assertIn("categorize_expense", tool_names)
         self.assertIn("update_record_status", tool_names)
         self.assertIn("audit_financial_system", tool_names)
+        self.assertIn("create_record", tool_names)
 
     def test_call_tool_msi(self):
         result = self.server.call_tool("calculate_msi_projection", {
@@ -288,10 +289,29 @@ class TestFinancialAIOrchestrator(unittest.TestCase):
         self.assertIn("Fondo de Emergencia", res.user_message)
         self.assertIn("3 y 6 meses", res.user_message)
 
-    def test_conversational_fallback_mentions_query(self):
-        res = self.orchestrator.process_query("Quiero planear unas vacaciones el próximo año")
+    def test_closed_domain_fallback(self):
+        res = self.orchestrator.process_query("¿Quién ganó el mundial de fútbol?")
         self.assertTrue(res.success)
-        self.assertIn("Quiero planear unas vacaciones", res.user_message)
+        self.assertIn("Asistente Financiero Especializado de GTOPagos", res.user_message)
+        self.assertIn("No puedo responder dudas sobre temas ajenos a finanzas", res.user_message)
+
+    def test_record_creation_intent_expense(self):
+        res = self.orchestrator.process_query("Registra un gasto de $450 en Uber")
+        self.assertTrue(res.success)
+        self.assertEqual(res.action_type, "MUTATION_PROPOSAL")
+        self.assertEqual(res.data.get("widget_type"), "action_confirmation")
+        self.assertEqual(res.data.get("amount"), "450")
+        self.assertEqual(res.data.get("behavior"), "EXPENSE")
+        self.assertEqual(res.data.get("category_name"), "Transporte & Combustible")
+        self.assertIn("este movimiento aún no se ha guardado", res.user_message)
+
+    def test_record_creation_intent_income(self):
+        res = self.orchestrator.process_query("Añade un ingreso de $15,000 de nómina")
+        self.assertTrue(res.success)
+        self.assertEqual(res.action_type, "MUTATION_PROPOSAL")
+        self.assertEqual(res.data.get("widget_type"), "action_confirmation")
+        self.assertEqual(res.data.get("behavior"), "INCOME")
+        self.assertEqual(res.data.get("amount"), "15000")
 
     def test_system_audit_query_unauthenticated(self):
         res = self.orchestrator.process_query("Analiza todo el sistema con mis gastos e ingresos y metas")

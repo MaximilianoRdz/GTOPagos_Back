@@ -98,3 +98,70 @@ class AgentCapabilitiesView(APIView):
             "tools": tools,
             "architecture": "Spec-Driven Development (SDD) + MCP (Model Context Protocol)"
         }, status=status.HTTP_200_OK)
+
+
+class AgentExecuteActionView(APIView):
+    """
+    Ejecuta una acción financiera previamente confirmada por el usuario (Human-in-the-Loop).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        operation_id="agent_execute_action",
+        summary="Ejecución de acción confirmada por el usuario",
+        description="Aplica una mutación en base de datos (ej. creación de registro) tras confirmación humana.",
+        request=inline_serializer(
+            name="AgentExecuteActionRequest",
+            fields={
+                "action": serializers.CharField(required=True, help_text="Nombre de la acción (ej. CREATE_RECORD)"),
+                "payload": serializers.DictField(required=True, help_text="Parámetros validados para la acción")
+            }
+        ),
+        responses={200: inline_serializer(
+            name="AgentExecuteActionResponse",
+            fields={
+                "success": serializers.BooleanField(),
+                "record_id": serializers.IntegerField(required=False),
+                "user_message": serializers.CharField()
+            }
+        )}
+    )
+    def post(self, request):
+        action = request.data.get("action")
+        payload = request.data.get("payload", {})
+
+        if action == "CREATE_RECORD":
+            if "record_type" not in payload and "behavior" in payload:
+                payload["record_type"] = payload["behavior"]
+
+            from dashboard.models import UserFinanceDashboard
+            dashboard_id = payload.get("dashboard_id")
+            dashboard = UserFinanceDashboard.objects.filter(id=dashboard_id, user=request.user).first()
+            if not dashboard:
+                dashboard = UserFinanceDashboard.objects.filter(user=request.user, is_active=True).first()
+                if not dashboard:
+                    return Response({
+                        "success": False,
+                        "error": "El usuario no tiene un espacio de trabajo/dashboard activo."
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                payload["dashboard_id"] = dashboard.id
+
+            res = mcp_server.call_tool("create_record", payload)
+            if res.success:
+                return Response({
+                    "success": True,
+                    "record_id": res.data.get("record_id"),
+                    "data": res.data,
+                    "user_message": res.user_message
+                }, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    "success": False,
+                    "error": res.user_message
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            "success": False,
+            "error": f"Acción '{action}' no reconocida o no soportada."
+        }, status=status.HTTP_400_BAD_REQUEST)
+
