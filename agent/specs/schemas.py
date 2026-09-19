@@ -142,9 +142,82 @@ class UpdateRecordStatusToolInput(BaseModel):
     target_status: Literal["PAGADO", "PAID", "CANCELADO", "PENDIENTE"]
 
 
+# ==============================================================================
+# 6. SCHEMAS: SKILL DE AUDITORÍA INTEGRAL DEL SISTEMA (SYSTEM AUDIT 360°)
+# ==============================================================================
+class AuditRecordItem(BaseModel):
+    id: Optional[int] = None
+    description: str = ""
+    amount: Decimal = Field(gt=0)
+    behavior: Literal["INCOME", "EXPENSE", "TRANSFER"]
+    category_name: str = "Otros"
+    record_date: date
+    is_recurrent: bool = False
+    total_installments: Optional[int] = None
+    current_installment: Optional[int] = None
+    payment_status: str = "PAGADO"
+
+
+class AuditGoalItem(BaseModel):
+    id: Optional[int] = None
+    name: str
+    target_amount: Decimal = Field(gt=0)
+    saved_amount: Decimal = Field(ge=0, default=Decimal('0.00'))
+    target_date: Optional[date] = None
+
+
+class SystemAuditInput(BaseModel):
+    user_name: str = "Usuario"
+    salary: Decimal = Field(default=Decimal('0.00'), ge=0)
+    records: List[AuditRecordItem] = Field(default_factory=list)
+    goals: List[AuditGoalItem] = Field(default_factory=list)
+
+
+class CategoryBreakdownItem(BaseModel):
+    category: str
+    total_amount: Decimal
+    percentage_of_expenses: Decimal
+    count: int
+
+
+class GoalFeasibilityItem(BaseModel):
+    name: str
+    saved_amount: Decimal
+    target_amount: Decimal
+    progress_percentage: Decimal
+    remaining_amount: Decimal
+    monthly_required: Decimal
+    is_viable: bool
+    status: Literal["LOGRADA", "VIABLE", "EN RIESGO"]
+    message: str
+
+
+class AuditRecommendation(BaseModel):
+    priority: Literal["ALTA", "MEDIA", "OPTIMIZACIÓN"]
+    title: str
+    detail: str
+    action_type: str
+
+
+class SystemAuditOutput(BaseModel):
+    health_score: int  # 0 to 100
+    health_status: Literal["EXCELENTE", "SALUDABLE", "MEJORABLE", "CRÍTICO"]
+    total_income: Decimal
+    total_expenses: Decimal
+    net_savings: Decimal
+    savings_rate: Decimal  # %
+    debt_burden_rate: Decimal  # % de gastos en deudas o compras a cuotas
+    monthly_fixed_commitments: Decimal
+    top_categories: List[CategoryBreakdownItem]
+    goals_feasibility: List[GoalFeasibilityItem]
+    recommendations: List[AuditRecommendation]
+    summary_text: str
+
+
 class AgentActionResponse(BaseModel):
     success: bool
     thought: str
     action_type: Literal["READ_ONLY", "MUTATION", "CALCULATION", "ALERT"]
     data: dict
     user_message: str
+

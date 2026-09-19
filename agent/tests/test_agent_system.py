@@ -20,11 +20,15 @@ from agent.specs.schemas import (
     PendingObligation,
     DueDateItem,
     UpdateRecordStatusToolInput,
+    AuditRecordItem,
+    AuditGoalItem,
+    SystemAuditInput,
 )
 from agent.skills.msi_calculator import calculate_msi_projection
 from agent.skills.cashflow_forecast import forecast_cashflow
 from agent.skills.due_date_priority import prioritize_due_dates
 from agent.skills.categorizer import categorize_expense
+from agent.skills.financial_auditor import audit_financial_system
 from agent.mcp_server.server import GTOPagosMCPServer
 
 
@@ -138,6 +142,35 @@ class TestSmartCategorizerSkill(unittest.TestCase):
         self.assertEqual(res.behavior, "INCOME")
 
 
+class TestSystemAuditSkill(unittest.TestCase):
+    def test_holistic_audit(self):
+        records = [
+            AuditRecordItem(description="Nómina", amount=Decimal('25000.00'), behavior="INCOME", record_date=date(2026, 9, 15), category_name="Sueldos"),
+            AuditRecordItem(description="Renta", amount=Decimal('7000.00'), behavior="EXPENSE", record_date=date(2026, 9, 5), category_name="Vivienda", is_recurrent=True),
+            AuditRecordItem(description="Supermercado", amount=Decimal('3500.00'), behavior="EXPENSE", record_date=date(2026, 9, 10), category_name="Alimentos"),
+            AuditRecordItem(description="MacBook MSI", amount=Decimal('2000.00'), behavior="EXPENSE", record_date=date(2026, 9, 12), category_name="Tecnología", total_installments=12, current_installment=3),
+        ]
+        goals = [
+            AuditGoalItem(name="Fondo Emergencia", target_amount=Decimal('50000.00'), saved_amount=Decimal('20000.00'), target_date=date(2027, 3, 1))
+        ]
+        payload = SystemAuditInput(
+            user_name="Carlos",
+            salary=Decimal('25000.00'),
+            records=records,
+            goals=goals
+        )
+        result = audit_financial_system(payload)
+        self.assertEqual(result.total_income, Decimal('25000.00'))
+        self.assertEqual(result.total_expenses, Decimal('12500.00'))
+        self.assertEqual(result.net_savings, Decimal('12500.00'))
+        self.assertEqual(result.savings_rate, Decimal('50.00'))
+        self.assertEqual(result.health_score, 75)
+        self.assertEqual(result.health_status, "SALUDABLE")
+        self.assertTrue(len(result.top_categories) > 0)
+        self.assertTrue(len(result.goals_feasibility) == 1)
+        self.assertTrue(result.goals_feasibility[0].is_viable)
+
+
 class TestMCPServer(unittest.TestCase):
     def setUp(self):
         self.server = GTOPagosMCPServer()
@@ -150,6 +183,7 @@ class TestMCPServer(unittest.TestCase):
         self.assertIn("prioritize_due_dates", tool_names)
         self.assertIn("categorize_expense", tool_names)
         self.assertIn("update_record_status", tool_names)
+        self.assertIn("audit_financial_system", tool_names)
 
     def test_call_tool_msi(self):
         result = self.server.call_tool("calculate_msi_projection", {
@@ -159,6 +193,20 @@ class TestMCPServer(unittest.TestCase):
         })
         self.assertTrue(result.success)
         self.assertEqual(result.data["monthly_installment"], "1000.00")
+
+    def test_call_tool_system_audit(self):
+        result = self.server.call_tool("audit_financial_system", {
+            "user_name": "Ana",
+            "salary": "20000.00",
+            "records": [
+                {"description": "Sueldo", "amount": "20000.00", "behavior": "INCOME", "category_name": "Salario", "record_date": "2026-09-01"},
+                {"description": "Renta", "amount": "6000.00", "behavior": "EXPENSE", "category_name": "Vivienda", "record_date": "2026-09-02"}
+            ],
+            "goals": []
+        })
+        self.assertTrue(result.success)
+        self.assertEqual(result.data.get("widget_type"), "system_audit")
+        self.assertIn("health_score", result.data)
 
     def test_guardrail_prevent_mutating_paid_record(self):
         # Intentar modificar un registro con current_status PAGADO debe fallar por guardrail
@@ -244,6 +292,11 @@ class TestFinancialAIOrchestrator(unittest.TestCase):
         res = self.orchestrator.process_query("Quiero planear unas vacaciones el próximo año")
         self.assertTrue(res.success)
         self.assertIn("Quiero planear unas vacaciones", res.user_message)
+
+    def test_system_audit_query_unauthenticated(self):
+        res = self.orchestrator.process_query("Analiza todo el sistema con mis gastos e ingresos y metas")
+        self.assertTrue(res.success)
+        self.assertIn("inicia sesión", res.user_message)
 
 
 if __name__ == "__main__":

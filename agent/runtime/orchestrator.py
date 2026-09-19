@@ -24,6 +24,9 @@ from agent.specs.schemas import (
     CategorizerInput,
     PendingObligation,
     DueDateItem,
+    AuditRecordItem,
+    AuditGoalItem,
+    SystemAuditInput,
     AgentActionResponse
 )
 from agent.mcp_server.server import mcp_server
@@ -65,7 +68,11 @@ class FinancialAIOrchestrator:
         if self._is_identity_or_help_query(query_lower):
             return self._handle_identity_intent()
 
-        # 3. Consultas sobre datos reales del usuario (Saldo, Gastos, Ingresos del mes)
+        # 3. Auditoría Integral 360° del Sistema (Ingresos, Gastos, Fugas, Deudas y Metas)
+        if self._is_system_audit_query(query_lower):
+            return self._handle_system_audit_intent(user)
+
+        # 4. Consultas sobre datos reales del usuario (Saldo, Gastos, Ingresos del mes)
         if self._is_user_balance_or_summary_query(query_lower):
             return self._handle_user_summary_intent(user, query_lower)
 
@@ -130,6 +137,18 @@ class FinancialAIOrchestrator:
             r'funciones\b'
         ]
         return any(re.search(p, text) for p in patterns)
+
+    def _is_system_audit_query(self, text: str) -> bool:
+        keywords = [
+            "analiza todo", "analiza el sistema", "analiza mis finanzas", "auditoria", "auditoría",
+            "diagnostico", "diagnóstico", "analisis completo", "análisis completo", "mas inteligente",
+            "más inteligente", "gastos e ingresos", "gastos y metas", "360", "analisis 360",
+            "análisis 360", "auditoría 360", "auditoria 360", "evalua mis finanzas",
+            "evalúa mis finanzas", "estado general", "salud financiera", "como estan mis finanzas",
+            "cómo están mis finanzas", "auditoría del sistema", "auditoria del sistema",
+            "audita mis finanzas", "auditar mis finanzas", "audita el sistema"
+        ]
+        return any(k in text for k in keywords)
 
     def _is_user_balance_or_summary_query(self, text: str) -> bool:
         keywords = [
@@ -258,6 +277,121 @@ class FinancialAIOrchestrator:
             ]},
             user_message=message
         )
+
+    def _handle_system_audit_intent(self, user) -> AgentActionResponse:
+        """
+        Ejecuta una auditoría financiera 360° holística sobre todos los registros
+        (ingresos, gastos, gastos recurrentes, deudas/MSI) y metas de ahorro del usuario.
+        """
+        if not user or not hasattr(user, "is_authenticated") or not user.is_authenticated:
+            return AgentActionResponse(
+                success=True,
+                thought="Usuario no autenticado para auditoría integral.",
+                action_type="READ_ONLY",
+                data={"widget_type": "info_banner"},
+                user_message="Para realizar una auditoría integral 360° de tus finanzas (ingresos, gastos fijos, cuotas y metas de ahorro), por favor inicia sesión en tu cuenta de GTOPagos."
+            )
+
+        try:
+            from finance.models import FinancialRecord, FinancialGoal
+
+            user_name = "Usuario"
+            if hasattr(user, "get_short_name") and user.get_short_name():
+                user_name = user.get_short_name()
+            elif hasattr(user, "first_name") and user.first_name:
+                user_name = user.first_name
+            elif hasattr(user, "email"):
+                user_name = user.email.split('@')[0]
+
+            salary = Decimal('0.00')
+            if hasattr(user, 'profile') and user.profile.salary:
+                salary = user.profile.salary
+
+            # Obtener registros activos
+            records_qs = FinancialRecord.objects.filter(
+                user=user,
+                is_active=True
+            ).select_related('record_type', 'category', 'payment_status')
+
+            audit_records = []
+            for r in records_qs:
+                beh = r.record_type.behavior if r.record_type else "EXPENSE"
+                cat_name = r.category.name if r.category else "Otros"
+                status_name = r.payment_status.status if r.payment_status else "PAGADO"
+                audit_records.append(
+                    AuditRecordItem(
+                        id=r.id,
+                        description=r.description or (r.record_type.name if r.record_type else "Transacción"),
+                        amount=r.amount,
+                        behavior=beh,
+                        category_name=cat_name,
+                        record_date=r.record_date,
+                        is_recurrent=bool(r.is_recurrent),
+                        total_installments=r.total_installments,
+                        current_installment=r.current_installment,
+                        payment_status=status_name
+                    )
+                )
+
+            # Obtener metas de ahorro
+            goals_qs = FinancialGoal.objects.filter(user=user)
+            audit_goals = []
+            for g in goals_qs:
+                audit_goals.append(
+                    AuditGoalItem(
+                        id=g.id,
+                        name=g.name,
+                        target_amount=g.target_amount,
+                        saved_amount=g.saved_amount or Decimal('0.00'),
+                        target_date=g.target_date
+                    )
+                )
+
+            audit_input = SystemAuditInput(
+                user_name=user_name,
+                salary=salary,
+                records=audit_records,
+                goals=audit_goals
+            )
+
+            # Ejecutar herramienta en MCP Server
+            response = self.mcp.call_tool("audit_financial_system", audit_input.model_dump())
+            if isinstance(response.data, dict):
+                response.data["widget_type"] = "system_audit"
+                health_score = response.data.get("health_score", 0)
+                health_status = response.data.get("health_status", "SALUDABLE")
+                total_income = Decimal(str(response.data.get("total_income", "0")))
+                total_expenses = Decimal(str(response.data.get("total_expenses", "0")))
+                net_savings = Decimal(str(response.data.get("net_savings", "0")))
+                savings_rate = response.data.get("savings_rate", "0")
+                debt_burden = response.data.get("debt_burden_rate", "0")
+                goals_list = response.data.get("goals_feasibility", [])
+                viable_goals = sum(1 for g in goals_list if g.get("is_viable") or g.get("status") in ["VIABLE", "LOGRADA"])
+
+                user_message = (
+                    f"### 🧠 Diagnóstico Financiero 360° ({user_name})\n\n"
+                    f"He auditado la totalidad de tus movimientos, cuotas recurrentes y metas registradas en el sistema:\n\n"
+                    f"- 🎯 **Salud Financiera General:** **{health_score}/100 ({health_status})**\n"
+                    f"- 💵 **Ingresos efectivos del periodo:** ${total_income:,.2f} MXN\n"
+                    f"- 🔴 **Gastos totales consolidados:** ${total_expenses:,.2f} MXN\n"
+                    f"- 🟢 **Margen de Ahorro Libre:** **${net_savings:,.2f} MXN** ({savings_rate}% de tu ingreso)\n"
+                    f"- 💳 **Carga fija / cuotas comprometidas:** {debt_burden}% de tus gastos\n"
+                    f"- 🏆 **Metas de Ahorro Viables:** **{viable_goals} de {len(goals_list)}** con tu margen actual\n\n"
+                    f"A continuación te presento la radiografía completa de tu sistema con fugas de gasto y recomendaciones estratégicas:"
+                )
+                response.user_message = user_message
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error executing 360 system audit: {e}", exc_info=True)
+            return AgentActionResponse(
+                success=False,
+                thought=f"Error en auditoría 360°: {str(e)}",
+                action_type="ALERT",
+                data={"widget_type": "info_banner"},
+                user_message="Ocurrió un inconveniente al auditar tus finanzas. Por favor intenta de nuevo en unos momentos."
+            )
 
     def _handle_user_summary_intent(self, user, query: str) -> AgentActionResponse:
         """

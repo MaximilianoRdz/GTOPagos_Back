@@ -16,12 +16,14 @@ from agent.specs.schemas import (
     CategorizerInput,
     CreateRecordToolInput,
     UpdateRecordStatusToolInput,
+    SystemAuditInput,
     AgentActionResponse
 )
 from agent.skills.msi_calculator import calculate_msi_projection
 from agent.skills.cashflow_forecast import forecast_cashflow
 from agent.skills.due_date_priority import prioritize_due_dates
 from agent.skills.categorizer import categorize_expense
+from agent.skills.financial_auditor import audit_financial_system
 
 
 class GTOPagosMCPServer:
@@ -72,6 +74,13 @@ class GTOPagosMCPServer:
             name="update_record_status",
             description="Actualiza el estado de un compromiso financiero a PAGADO o CANCELADO respetando la regla de inmutabilidad.",
             handler=self._handle_update_status
+        )
+
+        # 6. Herramienta de auditoría integral y diagnóstico 360°
+        self.register_tool(
+            name="audit_financial_system",
+            description="Audita integralmente ingresos, gastos por categoría, compras a meses y viabilidad de metas de ahorro, calculando el Financial Health Score (0-100).",
+            handler=self._handle_system_audit
         )
 
     def _register_default_resources(self):
@@ -221,6 +230,20 @@ class GTOPagosMCPServer:
             action_type="MUTATION",
             data={"record_id": rec_id, "new_status": target},
             user_message=f"Listo, el registro #{rec_id} ha sido marcado como {target} exitosamente."
+        )
+
+    def _handle_system_audit(self, args: Dict[str, Any]) -> AgentActionResponse:
+        validated_input = SystemAuditInput(**args)
+        result = audit_financial_system(validated_input)
+        data = result.model_dump(mode='json')
+        data["widget_type"] = "system_audit"
+
+        return AgentActionResponse(
+            success=True,
+            thought=f"Diagnóstico 360° completado. Score: {result.health_score}/100 ({result.health_status}).",
+            action_type="READ_ONLY",
+            data=data,
+            user_message=result.summary_text
         )
 
     # --- Dispatcher JSON-RPC 2.0 ---
