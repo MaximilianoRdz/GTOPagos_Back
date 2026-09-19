@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/', include('finance.urls')),
     path('api/', include('payments.urls')),
     path('api/', include('dashboard.urls')),
+    path('api/ai/', include('agent.urls')),
     # API Schema & Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),

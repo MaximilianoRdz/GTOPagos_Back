@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "finance",
     "payments",
     "dashboard",
+    "agent",
 ]
 
 MIDDLEWARE = [
@@ -96,9 +97,10 @@ if DATABASE_URL:
         }
     }
 else:
+    db_engine = os.getenv("DB_ENGINE", "django.db.backends.postgresql")
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.postgresql",
+            "ENGINE": db_engine,
             "NAME": os.getenv("DB_NAME", "gtopagos"),
             "USER": os.getenv("DB_USER", "postgres"),
             "PASSWORD": os.getenv("DB_PASSWORD", ""),
