@@ -55,7 +55,7 @@ class TokenValidateView(APIView):
             "user_id": user.id,
             "user": {
                 "email": user.email,
-                "name": user.get_short_name() or "Usuario"
+                "name": user.get_full_name() or user.get_short_name() or "Usuario"
             }
         }, status=status.HTTP_200_OK)
 

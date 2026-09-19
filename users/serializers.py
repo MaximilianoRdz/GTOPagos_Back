@@ -75,7 +75,7 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'last_login', 'created_at', 'updated_at']
 
     def get_name(self, obj):
-        return obj.get_short_name() or "Usuario"
+        return obj.get_full_name() or obj.get_short_name() or "Usuario"
 
     def validate(self, data):
         # Solo validar confirm_password si se proporciona
