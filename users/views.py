@@ -417,9 +417,12 @@ class DemoLoginView(APIView):
         responses={200: UserSerializer}
     )
     def post(self, request):
+        from datetime import timedelta
         from .demo_data import ensure_demo_user_and_data
         demo_user = ensure_demo_user_and_data()
         access_token = AccessToken.for_user(demo_user)
+        # Token con vigencia perpetua de 10 años para visitas y reclutadores en Modo Demo
+        access_token.set_exp(lifetime=timedelta(days=3650))
 
         return Response({
             "user": UserSerializer(demo_user).data,
