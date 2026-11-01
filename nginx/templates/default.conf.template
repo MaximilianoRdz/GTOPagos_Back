@@ -9,6 +9,10 @@ map $http_origin $cors_origin {
     "${FRONTEND_URL}" "$http_origin";
     "http://localhost:4200" "$http_origin";
     "http://127.0.0.1:4200" "$http_origin";
+    "http://tauri.localhost" "$http_origin";
+    "https://tauri.localhost" "$http_origin";
+    "tauri://localhost" "$http_origin";
+    "http://localhost" "$http_origin";
 }
 
 # Validación de clave del proxy: autorización por clave de bóveda
