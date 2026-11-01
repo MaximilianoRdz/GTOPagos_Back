@@ -98,14 +98,21 @@ if DATABASE_URL:
     }
 else:
     db_engine = os.getenv("DB_ENGINE", "django.db.backends.postgresql")
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = os.getenv("DB_PORT", "5434")
+    # Si DB_HOST viene como 'db' pero se ejecuta nativamente en el host (fuera de Docker)
+    if db_host == "db" and not os.path.exists("/.dockerenv"):
+        db_host = "127.0.0.1"
+        db_port = os.getenv("DB_EXTERNAL_PORT", "5434")
+
     DATABASES = {
         "default": {
             "ENGINE": db_engine,
             "NAME": os.getenv("DB_NAME", "gtopagos"),
             "USER": os.getenv("DB_USER", "postgres"),
-            "PASSWORD": os.getenv("DB_PASSWORD", ""),
-            "HOST": os.getenv("DB_HOST", "localhost"),
-            "PORT": os.getenv("DB_PORT", "5433"),
+            "PASSWORD": os.getenv("DB_PASSWORD", "MK021115"),
+            "HOST": db_host,
+            "PORT": db_port,
             "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", "60")),
         }
     }

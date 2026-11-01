@@ -1,0 +1,154 @@
+{
+  "diagram_type": "architecture",
+  "schema_version": 1,
+  "meta": {
+    "title": "Diagrama de Arquitectura",
+    "quality_profile": "showcase",
+    "output": "gtopagos_er_diagram.html"
+  },
+  "connections": [
+    {
+      "id": "c_1_Payroll_Employee",
+      "from": "Payroll",
+      "to": "Employee"
+    },
+    {
+      "id": "c_2_Attendance_Employee",
+      "from": "Attendance",
+      "to": "Employee"
+    },
+    {
+      "id": "c_3_Recruitment_Employee",
+      "from": "Recruitment",
+      "to": "Employee"
+    },
+    {
+      "id": "c_4_Performance_Employee",
+      "from": "Performance",
+      "to": "Employee"
+    }
+  ],
+  "components": [
+    {
+      "id": "fe_angular",
+      "type": "frontend",
+      "label": "Frontend GTOPagos (Angular 19)",
+      "sublabel": "UI Standalone, Signals, Tailwind",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "be_django",
+      "type": "backend",
+      "label": "Backend API (Django DRF)",
+      "sublabel": "Endpoints REST, ORM, Auth JWT",
+      "pos": [
+        360,
+        120
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "db_postgres",
+      "type": "database",
+      "label": "Base de Datos (PostgreSQL 16)",
+      "sublabel": "Puerto :5434, Esquema Financiero",
+      "pos": [
+        680,
+        120
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "ai_orquestador",
+      "type": "security",
+      "label": "Control Hub & Router Multi-Modelo",
+      "sublabel": "Qwen 2.5 Coder & DeepSeek R1",
+      "pos": [
+        40,
+        340
+      ],
+      "size": [
+        220,
+        64
+      ]
+    },
+    {
+      "id": "Payroll",
+      "type": "backend",
+      "label": "Payroll",
+      "pos": [
+        360,
+        340
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "Employee",
+      "type": "backend",
+      "label": "Employee",
+      "pos": [
+        680,
+        340
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "Attendance",
+      "type": "backend",
+      "label": "Attendance",
+      "pos": [
+        40,
+        560
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "Recruitment",
+      "type": "backend",
+      "label": "Recruitment",
+      "pos": [
+        360,
+        560
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "Performance",
+      "type": "backend",
+      "label": "Performance",
+      "pos": [
+        680,
+        560
+      ],
+      "size": [
+        150,
+        64
+      ]
+    }
+  ]
+}
